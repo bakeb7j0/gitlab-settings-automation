@@ -1,6 +1,5 @@
 """Unit tests for URL parsing in GitLabClient._extract_path_from_url()."""
 
-
 # Constants (also defined in conftest.py for fixtures)
 MOCK_GITLAB_URL = "https://gitlab.example.com"
 
