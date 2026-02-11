@@ -38,9 +38,9 @@ import sys
 import time
 import urllib.parse
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 import requests
 
@@ -83,6 +83,7 @@ class TargetType(Enum):
 @dataclass
 class Target:
     """Resolved GitLab target (group or project)."""
+
     type: TargetType
     id: int
     path: str
@@ -93,6 +94,7 @@ class Target:
 @dataclass
 class ActionResult:
     """Result of a single operation application."""
+
     target_type: str
     target_path: str
     target_id: int
@@ -152,15 +154,16 @@ def setup_logging(json_mode: bool = False, verbose: bool = False) -> logging.Log
 class GitLabClient:
     """Thin wrapper around GitLab REST API v4 with pagination support and retry logic."""
 
-    def __init__(self, base_url: str, token: str, dry_run: bool = False,
-                 max_retries: int = DEFAULT_MAX_RETRIES):
+    def __init__(self, base_url: str, token: str, dry_run: bool = False, max_retries: int = DEFAULT_MAX_RETRIES):
         self.base_url = base_url.rstrip("/")
         self.api_url = f"{self.base_url}{API_V4}"
         self.session = requests.Session()
-        self.session.headers.update({
-            "PRIVATE-TOKEN": token,
-            "Content-Type": "application/json",
-        })
+        self.session.headers.update(
+            {
+                "PRIVATE-TOKEN": token,
+                "Content-Type": "application/json",
+            }
+        )
         self.dry_run = dry_run
         self.max_retries = max_retries
         self.logger = logging.getLogger("gl-settings")
@@ -181,9 +184,7 @@ class GitLabClient:
                 # Retry on rate limit or server errors
                 if resp.status_code in RETRYABLE_STATUS_CODES and attempt < self.max_retries:
                     wait_time = self._calculate_backoff(resp, attempt)
-                    self.logger.warning(
-                        f"Retryable error {resp.status_code}, waiting {wait_time:.1f}s before retry"
-                    )
+                    self.logger.warning(f"Retryable error {resp.status_code}, waiting {wait_time:.1f}s before retry")
                     time.sleep(wait_time)
                     continue
 
@@ -195,10 +196,8 @@ class GitLabClient:
             except requests.exceptions.ConnectionError as e:
                 last_exception = e
                 if attempt < self.max_retries:
-                    wait_time = RETRY_BACKOFF_FACTOR * (2 ** attempt)
-                    self.logger.warning(
-                        f"Connection error, retrying in {wait_time:.1f}s: {e}"
-                    )
+                    wait_time = RETRY_BACKOFF_FACTOR * (2**attempt)
+                    self.logger.warning(f"Connection error, retrying in {wait_time:.1f}s: {e}")
                     time.sleep(wait_time)
                     continue
                 raise
@@ -217,7 +216,7 @@ class GitLabClient:
                     return float(retry_after)
                 except ValueError:
                     pass  # Fall through to exponential backoff
-        return RETRY_BACKOFF_FACTOR * (2 ** attempt)
+        return RETRY_BACKOFF_FACTOR * (2**attempt)
 
     def get(self, endpoint: str, params: dict | None = None) -> Any:
         return self._request("GET", endpoint, params=params).json()
@@ -288,7 +287,9 @@ class GitLabClient:
             )
         except requests.HTTPError as e:
             if e.response.status_code == 404:
-                raise SystemExit(f"ERROR: Could not resolve '{url}' as a project or group.")
+                raise SystemExit(
+                    f"ERROR: Could not resolve '{url}' as a project or group."
+                ) from None
             raise
 
     def _extract_path_from_url(self, url: str) -> str:
@@ -331,15 +332,17 @@ class GitLabClient:
 # Operation Base Class & Registry
 # ---------------------------------------------------------------------------
 
-_operation_registry: dict[str, type["Operation"]] = {}
+_operation_registry: dict[str, type[Operation]] = {}
 
 
 def register_operation(name: str):
     """Decorator to register an operation class under a CLI subcommand name."""
+
     def decorator(cls):
         _operation_registry[name] = cls
         cls.operation_name = name
         return cls
+
     return decorator
 
 
@@ -384,9 +387,7 @@ class Operation(ABC):
         }.get(result.action, "?")
 
         # Log to structured logger
-        record = self.logger.makeRecord(
-            "gl-settings", logging.INFO, "", 0, "", (), None
-        )
+        record = self.logger.makeRecord("gl-settings", logging.INFO, "", 0, "", (), None)
         record.action_result = result
         self.logger.handle(record)
 
@@ -407,8 +408,7 @@ class Operation(ABC):
 # ---------------------------------------------------------------------------
 
 
-def recurse(client: GitLabClient, target: Target, operation: Operation,
-            filter_pattern: str | None = None) -> None:
+def recurse(client: GitLabClient, target: Target, operation: Operation, filter_pattern: str | None = None) -> None:
     """Walk the target tree and apply the operation, optionally filtering projects."""
     logger = logging.getLogger("gl-settings")
 
@@ -455,15 +455,25 @@ class ProtectBranchOperation(Operation):
 
     @staticmethod
     def add_arguments(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("--branch", required=True, help="Branch name or wildcard pattern (e.g., 'release/1.2', 'release/*')")
-        parser.add_argument("--push", default="maintainer", choices=list(ACCESS_LEVELS.keys()),
-                            help="Allowed to push (default: maintainer)")
-        parser.add_argument("--merge", default="maintainer", choices=list(ACCESS_LEVELS.keys()),
-                            help="Allowed to merge (default: maintainer)")
-        parser.add_argument("--unprotect", action="store_true",
-                            help="Remove protection instead of applying it")
-        parser.add_argument("--allow-force-push", action="store_true", default=False,
-                            help="Allow force push to the branch")
+        parser.add_argument(
+            "--branch", required=True, help="Branch name or wildcard pattern (e.g., 'release/1.2', 'release/*')"
+        )
+        parser.add_argument(
+            "--push",
+            default="maintainer",
+            choices=list(ACCESS_LEVELS.keys()),
+            help="Allowed to push (default: maintainer)",
+        )
+        parser.add_argument(
+            "--merge",
+            default="maintainer",
+            choices=list(ACCESS_LEVELS.keys()),
+            help="Allowed to merge (default: maintainer)",
+        )
+        parser.add_argument("--unprotect", action="store_true", help="Remove protection instead of applying it")
+        parser.add_argument(
+            "--allow-force-push", action="store_true", default=False, help="Allow force push to the branch"
+        )
 
     def apply_to_project(self, project_id: int, project_path: str) -> ActionResult:
         branch = self.args.branch
@@ -478,60 +488,81 @@ class ProtectBranchOperation(Operation):
         # Check current protection state
         try:
             encoded_branch = urllib.parse.quote(branch, safe="")
-            existing = self.client.get(
-                f"/projects/{project_id}/protected_branches/{encoded_branch}"
-            )
+            existing = self.client.get(f"/projects/{project_id}/protected_branches/{encoded_branch}")
             # Branch is already protected — check if settings match
             current_push = self._max_access_level(existing.get("push_access_levels", []))
             current_merge = self._max_access_level(existing.get("merge_access_levels", []))
             current_force_push = existing.get("allow_force_push", False)
 
-            if (current_push == desired_push
-                    and current_merge == desired_merge
-                    and current_force_push == allow_force_push):
-                return self._record(ActionResult(
-                    target_type="project", target_path=project_path, target_id=project_id,
-                    operation=f"protect-branch:{branch}", action="already_set",
-                    detail=f"push={self.args.push}, merge={self.args.merge}",
-                ))
+            if (
+                current_push == desired_push
+                and current_merge == desired_merge
+                and current_force_push == allow_force_push
+            ):
+                return self._record(
+                    ActionResult(
+                        target_type="project",
+                        target_path=project_path,
+                        target_id=project_id,
+                        operation=f"protect-branch:{branch}",
+                        action="already_set",
+                        detail=f"push={self.args.push}, merge={self.args.merge}",
+                    )
+                )
 
             # Need to update — GitLab requires delete + recreate for protected branches
             if not self.client.dry_run:
-                self.client.delete(
-                    f"/projects/{project_id}/protected_branches/{encoded_branch}"
-                )
+                self.client.delete(f"/projects/{project_id}/protected_branches/{encoded_branch}")
         except requests.HTTPError as e:
             if e.response.status_code != 404:
-                return self._record(ActionResult(
-                    target_type="project", target_path=project_path, target_id=project_id,
-                    operation=f"protect-branch:{branch}", action="error",
-                    detail=str(e),
-                ))
+                return self._record(
+                    ActionResult(
+                        target_type="project",
+                        target_path=project_path,
+                        target_id=project_id,
+                        operation=f"protect-branch:{branch}",
+                        action="error",
+                        detail=str(e),
+                    )
+                )
             # 404 = not yet protected, proceed to create
 
         # Apply protection
         action = "would_apply" if self.client.dry_run else "applied"
         if not self.client.dry_run:
             try:
-                self.client.post(f"/projects/{project_id}/protected_branches", data={
-                    "name": branch,
-                    "push_access_level": desired_push,
-                    "merge_access_level": desired_merge,
-                    "allow_force_push": allow_force_push,
-                })
+                self.client.post(
+                    f"/projects/{project_id}/protected_branches",
+                    data={
+                        "name": branch,
+                        "push_access_level": desired_push,
+                        "merge_access_level": desired_merge,
+                        "allow_force_push": allow_force_push,
+                    },
+                )
             except requests.HTTPError as e:
-                return self._record(ActionResult(
-                    target_type="project", target_path=project_path, target_id=project_id,
-                    operation=f"protect-branch:{branch}", action="error",
-                    detail=str(e),
-                ))
+                return self._record(
+                    ActionResult(
+                        target_type="project",
+                        target_path=project_path,
+                        target_id=project_id,
+                        operation=f"protect-branch:{branch}",
+                        action="error",
+                        detail=str(e),
+                    )
+                )
 
-        return self._record(ActionResult(
-            target_type="project", target_path=project_path, target_id=project_id,
-            operation=f"protect-branch:{branch}", action=action,
-            detail=f"push={self.args.push}, merge={self.args.merge}, force_push={allow_force_push}",
-            dry_run=self.client.dry_run,
-        ))
+        return self._record(
+            ActionResult(
+                target_type="project",
+                target_path=project_path,
+                target_id=project_id,
+                operation=f"protect-branch:{branch}",
+                action=action,
+                detail=f"push={self.args.push}, merge={self.args.merge}, force_push={allow_force_push}",
+                dry_run=self.client.dry_run,
+            )
+        )
 
     def _unprotect(self, project_id: int, project_path: str, branch: str) -> ActionResult:
         encoded_branch = urllib.parse.quote(branch, safe="")
@@ -539,23 +570,33 @@ class ProtectBranchOperation(Operation):
             self.client.get(f"/projects/{project_id}/protected_branches/{encoded_branch}")
         except requests.HTTPError as e:
             if e.response.status_code == 404:
-                return self._record(ActionResult(
-                    target_type="project", target_path=project_path, target_id=project_id,
-                    operation=f"unprotect-branch:{branch}", action="already_set",
-                    detail="branch is not protected",
-                ))
+                return self._record(
+                    ActionResult(
+                        target_type="project",
+                        target_path=project_path,
+                        target_id=project_id,
+                        operation=f"unprotect-branch:{branch}",
+                        action="already_set",
+                        detail="branch is not protected",
+                    )
+                )
             raise
 
         action = "would_apply" if self.client.dry_run else "applied"
         if not self.client.dry_run:
             self.client.delete(f"/projects/{project_id}/protected_branches/{encoded_branch}")
 
-        return self._record(ActionResult(
-            target_type="project", target_path=project_path, target_id=project_id,
-            operation=f"unprotect-branch:{branch}", action=action,
-            detail="removed branch protection",
-            dry_run=self.client.dry_run,
-        ))
+        return self._record(
+            ActionResult(
+                target_type="project",
+                target_path=project_path,
+                target_id=project_id,
+                operation=f"unprotect-branch:{branch}",
+                action=action,
+                detail="removed branch protection",
+                dry_run=self.client.dry_run,
+            )
+        )
 
     @staticmethod
     def _max_access_level(access_levels: list[dict]) -> int:
@@ -576,12 +617,14 @@ class ProtectTagOperation(Operation):
 
     @staticmethod
     def add_arguments(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("--tag", required=True,
-                            help="Tag name or wildcard pattern (e.g., 'v1.2.*', 'release-*')")
-        parser.add_argument("--create", default="maintainer", choices=list(ACCESS_LEVELS.keys()),
-                            help="Allowed to create (default: maintainer)")
-        parser.add_argument("--unprotect", action="store_true",
-                            help="Remove tag protection instead of applying it")
+        parser.add_argument("--tag", required=True, help="Tag name or wildcard pattern (e.g., 'v1.2.*', 'release-*')")
+        parser.add_argument(
+            "--create",
+            default="maintainer",
+            choices=list(ACCESS_LEVELS.keys()),
+            help="Allowed to create (default: maintainer)",
+        )
+        parser.add_argument("--unprotect", action="store_true", help="Remove tag protection instead of applying it")
 
     def apply_to_project(self, project_id: int, project_path: str) -> ActionResult:
         tag = self.args.tag
@@ -594,17 +637,20 @@ class ProtectTagOperation(Operation):
         # Check current protection
         try:
             encoded_tag = urllib.parse.quote(tag, safe="")
-            existing = self.client.get(
-                f"/projects/{project_id}/protected_tags/{encoded_tag}"
-            )
+            existing = self.client.get(f"/projects/{project_id}/protected_tags/{encoded_tag}")
             current_create = self._max_access_level(existing.get("create_access_levels", []))
 
             if current_create == desired_create:
-                return self._record(ActionResult(
-                    target_type="project", target_path=project_path, target_id=project_id,
-                    operation=f"protect-tag:{tag}", action="already_set",
-                    detail=f"create={self.args.create}",
-                ))
+                return self._record(
+                    ActionResult(
+                        target_type="project",
+                        target_path=project_path,
+                        target_id=project_id,
+                        operation=f"protect-tag:{tag}",
+                        action="already_set",
+                        detail=f"create={self.args.create}",
+                    )
+                )
 
             # Update requires delete + recreate
             if not self.client.dry_run:
@@ -612,33 +658,51 @@ class ProtectTagOperation(Operation):
 
         except requests.HTTPError as e:
             if e.response.status_code != 404:
-                return self._record(ActionResult(
-                    target_type="project", target_path=project_path, target_id=project_id,
-                    operation=f"protect-tag:{tag}", action="error",
-                    detail=str(e),
-                ))
+                return self._record(
+                    ActionResult(
+                        target_type="project",
+                        target_path=project_path,
+                        target_id=project_id,
+                        operation=f"protect-tag:{tag}",
+                        action="error",
+                        detail=str(e),
+                    )
+                )
 
         # Apply protection
         action = "would_apply" if self.client.dry_run else "applied"
         if not self.client.dry_run:
             try:
-                self.client.post(f"/projects/{project_id}/protected_tags", data={
-                    "name": tag,
-                    "create_access_level": desired_create,
-                })
+                self.client.post(
+                    f"/projects/{project_id}/protected_tags",
+                    data={
+                        "name": tag,
+                        "create_access_level": desired_create,
+                    },
+                )
             except requests.HTTPError as e:
-                return self._record(ActionResult(
-                    target_type="project", target_path=project_path, target_id=project_id,
-                    operation=f"protect-tag:{tag}", action="error",
-                    detail=str(e),
-                ))
+                return self._record(
+                    ActionResult(
+                        target_type="project",
+                        target_path=project_path,
+                        target_id=project_id,
+                        operation=f"protect-tag:{tag}",
+                        action="error",
+                        detail=str(e),
+                    )
+                )
 
-        return self._record(ActionResult(
-            target_type="project", target_path=project_path, target_id=project_id,
-            operation=f"protect-tag:{tag}", action=action,
-            detail=f"create={self.args.create}",
-            dry_run=self.client.dry_run,
-        ))
+        return self._record(
+            ActionResult(
+                target_type="project",
+                target_path=project_path,
+                target_id=project_id,
+                operation=f"protect-tag:{tag}",
+                action=action,
+                detail=f"create={self.args.create}",
+                dry_run=self.client.dry_run,
+            )
+        )
 
     def _unprotect(self, project_id: int, project_path: str, tag: str) -> ActionResult:
         encoded_tag = urllib.parse.quote(tag, safe="")
@@ -646,23 +710,33 @@ class ProtectTagOperation(Operation):
             self.client.get(f"/projects/{project_id}/protected_tags/{encoded_tag}")
         except requests.HTTPError as e:
             if e.response.status_code == 404:
-                return self._record(ActionResult(
-                    target_type="project", target_path=project_path, target_id=project_id,
-                    operation=f"unprotect-tag:{tag}", action="already_set",
-                    detail="tag is not protected",
-                ))
+                return self._record(
+                    ActionResult(
+                        target_type="project",
+                        target_path=project_path,
+                        target_id=project_id,
+                        operation=f"unprotect-tag:{tag}",
+                        action="already_set",
+                        detail="tag is not protected",
+                    )
+                )
             raise
 
         action = "would_apply" if self.client.dry_run else "applied"
         if not self.client.dry_run:
             self.client.delete(f"/projects/{project_id}/protected_tags/{encoded_tag}")
 
-        return self._record(ActionResult(
-            target_type="project", target_path=project_path, target_id=project_id,
-            operation=f"unprotect-tag:{tag}", action=action,
-            detail="removed tag protection",
-            dry_run=self.client.dry_run,
-        ))
+        return self._record(
+            ActionResult(
+                target_type="project",
+                target_path=project_path,
+                target_id=project_id,
+                operation=f"unprotect-tag:{tag}",
+                action=action,
+                detail="removed tag protection",
+                dry_run=self.client.dry_run,
+            )
+        )
 
     @staticmethod
     def _max_access_level(access_levels: list[dict]) -> int:
@@ -683,9 +757,12 @@ class ProjectSettingOperation(Operation):
     @staticmethod
     def add_arguments(parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
-            "--setting", action="append", dest="settings", required=True,
+            "--setting",
+            action="append",
+            dest="settings",
+            required=True,
             metavar="KEY=VALUE",
-            help="Setting to apply (repeatable). Example: --setting visibility=private"
+            help="Setting to apply (repeatable). Example: --setting visibility=private",
         )
 
     def applies_to_group(self) -> bool:
@@ -722,11 +799,16 @@ class ProjectSettingOperation(Operation):
         desired: dict[str, Any] = {}
         for setting in self.args.settings:
             if "=" not in setting:
-                return self._record(ActionResult(
-                    target_type=entity_type, target_path=entity_path, target_id=entity_id,
-                    operation="project-setting", action="error",
-                    detail=f"Invalid format: {setting} (expected key=value)",
-                ))
+                return self._record(
+                    ActionResult(
+                        target_type=entity_type,
+                        target_path=entity_path,
+                        target_id=entity_id,
+                        operation="project-setting",
+                        action="error",
+                        detail=f"Invalid format: {setting} (expected key=value)",
+                    )
+                )
             key, value = setting.split("=", 1)
             desired[key.strip()] = self._coerce_value(value.strip())
 
@@ -734,21 +816,31 @@ class ProjectSettingOperation(Operation):
         try:
             current = self.client.get(get_endpoint)
         except requests.HTTPError as e:
-            return self._record(ActionResult(
-                target_type=entity_type, target_path=entity_path, target_id=entity_id,
-                operation="project-setting", action="error",
-                detail=f"Failed to get settings: {e}",
-            ))
+            return self._record(
+                ActionResult(
+                    target_type=entity_type,
+                    target_path=entity_path,
+                    target_id=entity_id,
+                    operation="project-setting",
+                    action="error",
+                    detail=f"Failed to get settings: {e}",
+                )
+            )
 
         # Compare and find changes
         changes = {k: v for k, v in desired.items() if current.get(k) != v}
 
         if not changes:
-            return self._record(ActionResult(
-                target_type=entity_type, target_path=entity_path, target_id=entity_id,
-                operation="project-setting", action="already_set",
-                detail=f"keys: {list(desired.keys())}",
-            ))
+            return self._record(
+                ActionResult(
+                    target_type=entity_type,
+                    target_path=entity_path,
+                    target_id=entity_id,
+                    operation="project-setting",
+                    action="already_set",
+                    detail=f"keys: {list(desired.keys())}",
+                )
+            )
 
         # Apply changes
         action = "would_apply" if self.client.dry_run else "applied"
@@ -756,18 +848,28 @@ class ProjectSettingOperation(Operation):
             try:
                 self.client.put(put_endpoint, data=changes)
             except requests.HTTPError as e:
-                return self._record(ActionResult(
-                    target_type=entity_type, target_path=entity_path, target_id=entity_id,
-                    operation="project-setting", action="error",
-                    detail=f"Failed to apply: {e}",
-                ))
+                return self._record(
+                    ActionResult(
+                        target_type=entity_type,
+                        target_path=entity_path,
+                        target_id=entity_id,
+                        operation="project-setting",
+                        action="error",
+                        detail=f"Failed to apply: {e}",
+                    )
+                )
 
-        return self._record(ActionResult(
-            target_type=entity_type, target_path=entity_path, target_id=entity_id,
-            operation="project-setting", action=action,
-            detail=f"changed: {list(changes.keys())}",
-            dry_run=self.client.dry_run,
-        ))
+        return self._record(
+            ActionResult(
+                target_type=entity_type,
+                target_path=entity_path,
+                target_id=entity_id,
+                operation="project-setting",
+                action=action,
+                detail=f"changed: {list(changes.keys())}",
+                dry_run=self.client.dry_run,
+            )
+        )
 
     @staticmethod
     def _coerce_value(value: str) -> Any:
@@ -802,16 +904,25 @@ class ApprovalRuleOperation(Operation):
 
     @staticmethod
     def add_arguments(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("--rule-name", required=True,
-                            help="Name of the approval rule (used to find/create)")
-        parser.add_argument("--approvals", type=int, default=None,
-                            help="Required number of approvals")
-        parser.add_argument("--add-user", action="append", dest="add_users", default=[],
-                            metavar="USER", help="Add user (username or ID, repeatable)")
-        parser.add_argument("--remove-user", action="append", dest="remove_users", default=[],
-                            metavar="USER", help="Remove user (username or ID, repeatable)")
-        parser.add_argument("--unprotect", action="store_true",
-                            help="Delete the approval rule")
+        parser.add_argument("--rule-name", required=True, help="Name of the approval rule (used to find/create)")
+        parser.add_argument("--approvals", type=int, default=None, help="Required number of approvals")
+        parser.add_argument(
+            "--add-user",
+            action="append",
+            dest="add_users",
+            default=[],
+            metavar="USER",
+            help="Add user (username or ID, repeatable)",
+        )
+        parser.add_argument(
+            "--remove-user",
+            action="append",
+            dest="remove_users",
+            default=[],
+            metavar="USER",
+            help="Remove user (username or ID, repeatable)",
+        )
+        parser.add_argument("--unprotect", action="store_true", help="Delete the approval rule")
 
     def apply_to_project(self, project_id: int, project_path: str) -> ActionResult:
         rule_name = self.args.rule_name
@@ -847,35 +958,53 @@ class ApprovalRuleOperation(Operation):
         rule_name = self.args.rule_name
 
         if self.args.approvals is None:
-            return self._record(ActionResult(
-                target_type="project", target_path=project_path, target_id=project_id,
-                operation=f"approval-rule:{rule_name}", action="error",
-                detail="--approvals is required when creating a new rule",
-            ))
+            return self._record(
+                ActionResult(
+                    target_type="project",
+                    target_path=project_path,
+                    target_id=project_id,
+                    operation=f"approval-rule:{rule_name}",
+                    action="error",
+                    detail="--approvals is required when creating a new rule",
+                )
+            )
 
         user_ids = self._resolve_users(self.args.add_users)
 
         action = "would_apply" if self.client.dry_run else "applied"
         if not self.client.dry_run:
             try:
-                self.client.post(f"/projects/{project_id}/approval_rules", data={
-                    "name": rule_name,
-                    "approvals_required": self.args.approvals,
-                    "user_ids": user_ids,
-                })
+                self.client.post(
+                    f"/projects/{project_id}/approval_rules",
+                    data={
+                        "name": rule_name,
+                        "approvals_required": self.args.approvals,
+                        "user_ids": user_ids,
+                    },
+                )
             except requests.HTTPError as e:
-                return self._record(ActionResult(
-                    target_type="project", target_path=project_path, target_id=project_id,
-                    operation=f"approval-rule:{rule_name}", action="error",
-                    detail=str(e),
-                ))
+                return self._record(
+                    ActionResult(
+                        target_type="project",
+                        target_path=project_path,
+                        target_id=project_id,
+                        operation=f"approval-rule:{rule_name}",
+                        action="error",
+                        detail=str(e),
+                    )
+                )
 
-        return self._record(ActionResult(
-            target_type="project", target_path=project_path, target_id=project_id,
-            operation=f"approval-rule:{rule_name}", action=action,
-            detail=f"created with {self.args.approvals} approvals, {len(user_ids)} users",
-            dry_run=self.client.dry_run,
-        ))
+        return self._record(
+            ActionResult(
+                target_type="project",
+                target_path=project_path,
+                target_id=project_id,
+                operation=f"approval-rule:{rule_name}",
+                action=action,
+                detail=f"created with {self.args.approvals} approvals, {len(user_ids)} users",
+                dry_run=self.client.dry_run,
+            )
+        )
 
     def _update_rule(self, project_id: int, project_path: str, existing: dict) -> ActionResult:
         """Update an existing approval rule."""
@@ -894,25 +1023,38 @@ class ApprovalRuleOperation(Operation):
 
         # Check if anything changed
         if current_approvals == desired_approvals and current_user_ids == desired_user_ids:
-            return self._record(ActionResult(
-                target_type="project", target_path=project_path, target_id=project_id,
-                operation=f"approval-rule:{rule_name}", action="already_set",
-                detail=f"approvals={current_approvals}, users={len(current_user_ids)}",
-            ))
+            return self._record(
+                ActionResult(
+                    target_type="project",
+                    target_path=project_path,
+                    target_id=project_id,
+                    operation=f"approval-rule:{rule_name}",
+                    action="already_set",
+                    detail=f"approvals={current_approvals}, users={len(current_user_ids)}",
+                )
+            )
 
         action = "would_apply" if self.client.dry_run else "applied"
         if not self.client.dry_run:
             try:
-                self.client.put(f"/projects/{project_id}/approval_rules/{rule_id}", data={
-                    "approvals_required": desired_approvals,
-                    "user_ids": list(desired_user_ids),
-                })
+                self.client.put(
+                    f"/projects/{project_id}/approval_rules/{rule_id}",
+                    data={
+                        "approvals_required": desired_approvals,
+                        "user_ids": list(desired_user_ids),
+                    },
+                )
             except requests.HTTPError as e:
-                return self._record(ActionResult(
-                    target_type="project", target_path=project_path, target_id=project_id,
-                    operation=f"approval-rule:{rule_name}", action="error",
-                    detail=str(e),
-                ))
+                return self._record(
+                    ActionResult(
+                        target_type="project",
+                        target_path=project_path,
+                        target_id=project_id,
+                        operation=f"approval-rule:{rule_name}",
+                        action="error",
+                        detail=str(e),
+                    )
+                )
 
         # Build change description
         changes = []
@@ -921,41 +1063,61 @@ class ApprovalRuleOperation(Operation):
         if current_user_ids != desired_user_ids:
             changes.append(f"users: {len(current_user_ids)} -> {len(desired_user_ids)}")
 
-        return self._record(ActionResult(
-            target_type="project", target_path=project_path, target_id=project_id,
-            operation=f"approval-rule:{rule_name}", action=action,
-            detail="; ".join(changes),
-            dry_run=self.client.dry_run,
-        ))
+        return self._record(
+            ActionResult(
+                target_type="project",
+                target_path=project_path,
+                target_id=project_id,
+                operation=f"approval-rule:{rule_name}",
+                action=action,
+                detail="; ".join(changes),
+                dry_run=self.client.dry_run,
+            )
+        )
 
     def _delete_rule(self, project_id: int, project_path: str, rule_name: str) -> ActionResult:
         """Delete an approval rule."""
         existing = self._find_rule(project_id, rule_name)
 
         if not existing:
-            return self._record(ActionResult(
-                target_type="project", target_path=project_path, target_id=project_id,
-                operation=f"approval-rule:{rule_name}", action="already_set",
-                detail="rule does not exist",
-            ))
+            return self._record(
+                ActionResult(
+                    target_type="project",
+                    target_path=project_path,
+                    target_id=project_id,
+                    operation=f"approval-rule:{rule_name}",
+                    action="already_set",
+                    detail="rule does not exist",
+                )
+            )
 
         action = "would_apply" if self.client.dry_run else "applied"
         if not self.client.dry_run:
             try:
                 self.client.delete(f"/projects/{project_id}/approval_rules/{existing['id']}")
             except requests.HTTPError as e:
-                return self._record(ActionResult(
-                    target_type="project", target_path=project_path, target_id=project_id,
-                    operation=f"approval-rule:{rule_name}", action="error",
-                    detail=str(e),
-                ))
+                return self._record(
+                    ActionResult(
+                        target_type="project",
+                        target_path=project_path,
+                        target_id=project_id,
+                        operation=f"approval-rule:{rule_name}",
+                        action="error",
+                        detail=str(e),
+                    )
+                )
 
-        return self._record(ActionResult(
-            target_type="project", target_path=project_path, target_id=project_id,
-            operation=f"approval-rule:{rule_name}", action=action,
-            detail="deleted approval rule",
-            dry_run=self.client.dry_run,
-        ))
+        return self._record(
+            ActionResult(
+                target_type="project",
+                target_path=project_path,
+                target_id=project_id,
+                operation=f"approval-rule:{rule_name}",
+                action=action,
+                detail="deleted approval rule",
+                dry_run=self.client.dry_run,
+            )
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -971,26 +1133,43 @@ class MergeRequestSettingOperation(Operation):
     # Format: legacy_field -> (modern_field, is_inverted)
     FIELD_MAPPING = {
         "reset_approvals_on_push": ("retain_approvals_on_push", True),
-        "disable_overriding_approvers_per_merge_request": (
-            "allow_overrides_to_approver_list_per_merge_request", True
-        ),
+        "disable_overriding_approvers_per_merge_request": ("allow_overrides_to_approver_list_per_merge_request", True),
         "merge_requests_author_approval": ("allow_author_approval", False),
         "merge_requests_disable_committers_approval": ("allow_committer_approval", True),
     }
 
     @staticmethod
     def add_arguments(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("--approvals-before-merge", type=int, default=None,
-                            help="Required approvals before merge (deprecated in newer GitLab)")
-        parser.add_argument("--reset-approvals-on-push", choices=["true", "false"], default=None,
-                            help="Reset approvals when new commits are pushed")
-        parser.add_argument("--disable-overriding-approvers", choices=["true", "false"], default=None,
-                            help="Prevent users from modifying approvers per MR")
-        parser.add_argument("--merge-requests-author-approval", choices=["true", "false"], default=None,
-                            help="Allow MR author to approve their own MR")
-        parser.add_argument("--merge-requests-disable-committers-approval", choices=["true", "false"],
-                            default=None,
-                            help="Prevent committers from approving MRs they committed to")
+        parser.add_argument(
+            "--approvals-before-merge",
+            type=int,
+            default=None,
+            help="Required approvals before merge (deprecated in newer GitLab)",
+        )
+        parser.add_argument(
+            "--reset-approvals-on-push",
+            choices=["true", "false"],
+            default=None,
+            help="Reset approvals when new commits are pushed",
+        )
+        parser.add_argument(
+            "--disable-overriding-approvers",
+            choices=["true", "false"],
+            default=None,
+            help="Prevent users from modifying approvers per MR",
+        )
+        parser.add_argument(
+            "--merge-requests-author-approval",
+            choices=["true", "false"],
+            default=None,
+            help="Allow MR author to approve their own MR",
+        )
+        parser.add_argument(
+            "--merge-requests-disable-committers-approval",
+            choices=["true", "false"],
+            default=None,
+            help="Prevent committers from approving MRs they committed to",
+        )
 
     def apply_to_project(self, project_id: int, project_path: str) -> ActionResult:
         # Build desired settings from args
@@ -1001,24 +1180,25 @@ class MergeRequestSettingOperation(Operation):
         if self.args.reset_approvals_on_push is not None:
             desired["reset_approvals_on_push"] = self.args.reset_approvals_on_push == "true"
         if self.args.disable_overriding_approvers is not None:
-            desired["disable_overriding_approvers_per_merge_request"] = (
-                self.args.disable_overriding_approvers == "true"
-            )
+            desired["disable_overriding_approvers_per_merge_request"] = self.args.disable_overriding_approvers == "true"
         if self.args.merge_requests_author_approval is not None:
-            desired["merge_requests_author_approval"] = (
-                self.args.merge_requests_author_approval == "true"
-            )
+            desired["merge_requests_author_approval"] = self.args.merge_requests_author_approval == "true"
         if self.args.merge_requests_disable_committers_approval is not None:
             desired["merge_requests_disable_committers_approval"] = (
                 self.args.merge_requests_disable_committers_approval == "true"
             )
 
         if not desired:
-            return self._record(ActionResult(
-                target_type="project", target_path=project_path, target_id=project_id,
-                operation="merge-request-setting", action="skipped",
-                detail="No settings specified",
-            ))
+            return self._record(
+                ActionResult(
+                    target_type="project",
+                    target_path=project_path,
+                    target_id=project_id,
+                    operation="merge-request-setting",
+                    action="skipped",
+                    detail="No settings specified",
+                )
+            )
 
         # Try modern API first, fall back to legacy
         result = self._try_modern_api(project_id, project_path, desired)
@@ -1026,9 +1206,7 @@ class MergeRequestSettingOperation(Operation):
             return result
         return self._use_legacy_api(project_id, project_path, desired)
 
-    def _try_modern_api(
-        self, project_id: int, project_path: str, desired: dict[str, Any]
-    ) -> ActionResult | None:
+    def _try_modern_api(self, project_id: int, project_path: str, desired: dict[str, Any]) -> ActionResult | None:
         """Try the modern merge_request_approval_settings API (GitLab 13.x+)."""
         endpoint = f"/projects/{project_id}/merge_request_approval_settings"
 
@@ -1038,11 +1216,16 @@ class MergeRequestSettingOperation(Operation):
             if e.response.status_code == 404:
                 self.logger.debug("Modern approval settings API not available, falling back to legacy")
                 return None  # Signal to use legacy API
-            return self._record(ActionResult(
-                target_type="project", target_path=project_path, target_id=project_id,
-                operation="merge-request-setting", action="error",
-                detail=f"Failed to get settings: {e}",
-            ))
+            return self._record(
+                ActionResult(
+                    target_type="project",
+                    target_path=project_path,
+                    target_id=project_id,
+                    operation="merge-request-setting",
+                    action="error",
+                    detail=f"Failed to get settings: {e}",
+                )
+            )
 
         # Map legacy field names to modern API and handle inverted logic
         changes: dict[str, Any] = {}
@@ -1062,54 +1245,77 @@ class MergeRequestSettingOperation(Operation):
                 changes[legacy_key] = value
 
         if not changes:
-            return self._record(ActionResult(
-                target_type="project", target_path=project_path, target_id=project_id,
-                operation="merge-request-setting", action="already_set",
-                detail=f"keys: {list(desired.keys())}",
-            ))
+            return self._record(
+                ActionResult(
+                    target_type="project",
+                    target_path=project_path,
+                    target_id=project_id,
+                    operation="merge-request-setting",
+                    action="already_set",
+                    detail=f"keys: {list(desired.keys())}",
+                )
+            )
 
         action = "would_apply" if self.client.dry_run else "applied"
         if not self.client.dry_run:
             try:
                 self.client.put(endpoint, data=changes)
             except requests.HTTPError as e:
-                return self._record(ActionResult(
-                    target_type="project", target_path=project_path, target_id=project_id,
-                    operation="merge-request-setting", action="error",
-                    detail=f"Failed to apply: {e}",
-                ))
+                return self._record(
+                    ActionResult(
+                        target_type="project",
+                        target_path=project_path,
+                        target_id=project_id,
+                        operation="merge-request-setting",
+                        action="error",
+                        detail=f"Failed to apply: {e}",
+                    )
+                )
 
-        return self._record(ActionResult(
-            target_type="project", target_path=project_path, target_id=project_id,
-            operation="merge-request-setting", action=action,
-            detail=f"changed (modern API): {list(changes.keys())}",
-            dry_run=self.client.dry_run,
-        ))
+        return self._record(
+            ActionResult(
+                target_type="project",
+                target_path=project_path,
+                target_id=project_id,
+                operation="merge-request-setting",
+                action=action,
+                detail=f"changed (modern API): {list(changes.keys())}",
+                dry_run=self.client.dry_run,
+            )
+        )
 
-    def _use_legacy_api(
-        self, project_id: int, project_path: str, desired: dict[str, Any]
-    ) -> ActionResult:
+    def _use_legacy_api(self, project_id: int, project_path: str, desired: dict[str, Any]) -> ActionResult:
         """Use the legacy /approvals API (GitLab 12.x and earlier)."""
         endpoint = f"/projects/{project_id}/approvals"
 
         try:
             current = self.client.get(endpoint)
         except requests.HTTPError as e:
-            return self._record(ActionResult(
-                target_type="project", target_path=project_path, target_id=project_id,
-                operation="merge-request-setting", action="error",
-                detail=f"Failed to get settings: {e}",
-            ))
+            return self._record(
+                ActionResult(
+                    target_type="project",
+                    target_path=project_path,
+                    target_id=project_id,
+                    operation="merge-request-setting",
+                    action="error",
+                    detail=f"Failed to get settings: {e}",
+                )
+            )
 
         # Compare and find changes (legacy API uses same field names as our args)
         changes = {k: v for k, v in desired.items() if current.get(k) != v}
 
         if not changes:
-            return self._record(ActionResult(
-                target_type="project", target_path=project_path, target_id=project_id,
-                operation="merge-request-setting", action="already_set",
-                detail=f"keys: {list(desired.keys())}",
-            ))
+            return self._record(
+                ActionResult(
+                    target_type="project",
+                    target_path=project_path,
+                    target_id=project_id,
+                    operation="merge-request-setting",
+                    action="already_set",
+                    detail=f"keys: {list(desired.keys())}",
+                )
+            )
 
         action = "would_apply" if self.client.dry_run else "applied"
         if not self.client.dry_run:
@@ -1117,18 +1323,28 @@ class MergeRequestSettingOperation(Operation):
                 # Legacy API uses POST, not PUT!
                 self.client.post(endpoint, data=changes)
             except requests.HTTPError as e:
-                return self._record(ActionResult(
-                    target_type="project", target_path=project_path, target_id=project_id,
-                    operation="merge-request-setting", action="error",
-                    detail=f"Failed to apply: {e}",
-                ))
+                return self._record(
+                    ActionResult(
+                        target_type="project",
+                        target_path=project_path,
+                        target_id=project_id,
+                        operation="merge-request-setting",
+                        action="error",
+                        detail=f"Failed to apply: {e}",
+                    )
+                )
 
-        return self._record(ActionResult(
-            target_type="project", target_path=project_path, target_id=project_id,
-            operation="merge-request-setting", action=action,
-            detail=f"changed (legacy API): {list(changes.keys())}",
-            dry_run=self.client.dry_run,
-        ))
+        return self._record(
+            ActionResult(
+                target_type="project",
+                target_path=project_path,
+                target_id=project_id,
+                operation="merge-request-setting",
+                action=action,
+                detail=f"changed (legacy API): {list(changes.keys())}",
+                dry_run=self.client.dry_run,
+            )
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1143,21 +1359,28 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Show what would be done without making changes")
-    parser.add_argument("--json", action="store_true", dest="json_output",
-                        help="Output results as JSON lines (to stderr)")
-    parser.add_argument("--verbose", "-v", action="store_true",
-                        help="Enable debug logging")
-    parser.add_argument("--gitlab-url", default=None,
-                        help="GitLab instance URL (default: from GITLAB_URL env or https://gitlab.com)")
-    parser.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES,
-                        help=f"Maximum retry attempts for transient errors (default: {DEFAULT_MAX_RETRIES})")
-    parser.add_argument("--filter", dest="filter_pattern", default=None,
-                        help="Glob pattern to filter projects by path (e.g., 'myorg/team-*/*')")
+    parser.add_argument("--dry-run", action="store_true", help="Show what would be done without making changes")
+    parser.add_argument(
+        "--json", action="store_true", dest="json_output", help="Output results as JSON lines (to stderr)"
+    )
+    parser.add_argument("--verbose", "-v", action="store_true", help="Enable debug logging")
+    parser.add_argument(
+        "--gitlab-url", default=None, help="GitLab instance URL (default: from GITLAB_URL env or https://gitlab.com)"
+    )
+    parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=DEFAULT_MAX_RETRIES,
+        help=f"Maximum retry attempts for transient errors (default: {DEFAULT_MAX_RETRIES})",
+    )
+    parser.add_argument(
+        "--filter",
+        dest="filter_pattern",
+        default=None,
+        help="Glob pattern to filter projects by path (e.g., 'myorg/team-*/*')",
+    )
 
-    subparsers = parser.add_subparsers(dest="operation", required=True,
-                                        help="Operation to perform")
+    subparsers = parser.add_subparsers(dest="operation", required=True, help="Operation to perform")
 
     for name, op_cls in sorted(_operation_registry.items()):
         sub = subparsers.add_parser(name, help=op_cls.__doc__)
@@ -1184,8 +1407,7 @@ def main() -> int:
     logger = setup_logging(json_mode=args.json_output, verbose=args.verbose)
 
     # Build client
-    client = GitLabClient(base_url=gitlab_url, token=token, dry_run=args.dry_run,
-                          max_retries=args.max_retries)
+    client = GitLabClient(base_url=gitlab_url, token=token, dry_run=args.dry_run, max_retries=args.max_retries)
 
     # Resolve target
     logger.info(f"Resolving target: {args.target_url}")
@@ -1219,8 +1441,10 @@ def main() -> int:
     already = sum(1 for r in operation.results if r.action == "already_set")
     errors = sum(1 for r in operation.results if r.action == "error")
 
-    logger.info(f"Done: {total} targets, {applied} {'would change' if args.dry_run else 'changed'}, "
-                f"{already} already set, {errors} errors")
+    logger.info(
+        f"Done: {total} targets, {applied} {'would change' if args.dry_run else 'changed'}, "
+        f"{already} already set, {errors} errors"
+    )
 
     # Exit code: non-zero if any errors
     return 1 if errors > 0 else 0

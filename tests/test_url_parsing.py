@@ -1,6 +1,5 @@
 """Unit tests for URL parsing in GitLabClient._extract_path_from_url()."""
 
-import pytest
 
 # Constants (also defined in conftest.py for fixtures)
 MOCK_GITLAB_URL = "https://gitlab.example.com"
@@ -31,9 +30,7 @@ class TestExtractPathFromUrl:
 
     def test_url_with_settings_path(self, mock_client):
         """URL with /-/ settings path strips it."""
-        result = mock_client._extract_path_from_url(
-            "https://gitlab.com/org/project/-/settings/repository"
-        )
+        result = mock_client._extract_path_from_url("https://gitlab.com/org/project/-/settings/repository")
         assert result == "org/project"
 
     def test_url_with_hyphen_only(self, mock_client):
@@ -63,9 +60,7 @@ class TestExtractPathFromUrl:
 
     def test_deeply_nested_path(self, mock_client):
         """Deeply nested group/project path."""
-        result = mock_client._extract_path_from_url(
-            "https://gitlab.com/org/team/subteam/project"
-        )
+        result = mock_client._extract_path_from_url("https://gitlab.com/org/team/subteam/project")
         assert result == "org/team/subteam/project"
 
     def test_deeply_nested_bare_path(self, mock_client):
@@ -76,23 +71,17 @@ class TestExtractPathFromUrl:
     def test_url_with_tree_path(self, mock_client):
         """URL pointing to a branch/tree strips the extra path."""
         # Note: Current implementation would include /-/ so this tests the /-/ stripping
-        result = mock_client._extract_path_from_url(
-            "https://gitlab.com/org/project/-/tree/main"
-        )
+        result = mock_client._extract_path_from_url("https://gitlab.com/org/project/-/tree/main")
         assert result == "org/project"
 
     def test_url_with_merge_requests_path(self, mock_client):
         """URL pointing to merge requests strips the extra path."""
-        result = mock_client._extract_path_from_url(
-            "https://gitlab.com/org/project/-/merge_requests"
-        )
+        result = mock_client._extract_path_from_url("https://gitlab.com/org/project/-/merge_requests")
         assert result == "org/project"
 
     def test_custom_gitlab_instance(self, mock_client):
         """URL from custom GitLab instance."""
-        result = mock_client._extract_path_from_url(
-            "https://gitlab.mycompany.com/team/service"
-        )
+        result = mock_client._extract_path_from_url("https://gitlab.mycompany.com/team/service")
         assert result == "team/service"
 
     def test_path_with_dots(self, mock_client):
