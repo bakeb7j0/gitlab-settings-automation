@@ -287,9 +287,7 @@ class GitLabClient:
             )
         except requests.HTTPError as e:
             if e.response.status_code == 404:
-                raise SystemExit(
-                    f"ERROR: Could not resolve '{url}' as a project or group."
-                ) from None
+                raise SystemExit(f"ERROR: Could not resolve '{url}' as a project or group.") from None
             raise
 
     def _extract_path_from_url(self, url: str) -> str:
