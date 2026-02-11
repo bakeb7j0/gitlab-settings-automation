@@ -30,6 +30,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import logging
 import os
@@ -392,9 +393,16 @@ class Operation(ABC):
 # ---------------------------------------------------------------------------
 
 
-def recurse(client: GitLabClient, target: Target, operation: Operation) -> None:
-    """Walk the target tree and apply the operation."""
+def recurse(client: GitLabClient, target: Target, operation: Operation,
+            filter_pattern: str | None = None) -> None:
+    """Walk the target tree and apply the operation, optionally filtering projects."""
+    logger = logging.getLogger("gl-settings")
+
     if target.type == TargetType.PROJECT:
+        # Apply filter to direct project targets
+        if filter_pattern and not fnmatch.fnmatch(target.path, filter_pattern):
+            logger.debug(f"Skipping project (filter): {target.path}")
+            return
         operation.apply_to_project(target.id, target.path)
         return
 
@@ -402,7 +410,7 @@ def recurse(client: GitLabClient, target: Target, operation: Operation) -> None:
     if operation.applies_to_group():
         operation.apply_to_group(target.id, target.path)
 
-    # Recurse into subgroups
+    # Recurse into subgroups (groups are always traversed, filter applies only to projects)
     for subgroup in client.get_subgroups(target.id):
         sub_target = Target(
             type=TargetType.GROUP,
@@ -411,11 +419,15 @@ def recurse(client: GitLabClient, target: Target, operation: Operation) -> None:
             name=subgroup["name"],
             web_url=subgroup["web_url"],
         )
-        recurse(client, sub_target, operation)
+        recurse(client, sub_target, operation, filter_pattern)
 
-    # Apply to direct child projects
+    # Apply to direct child projects (with filtering)
     for project in client.get_group_projects(target.id):
-        operation.apply_to_project(project["id"], project["path_with_namespace"])
+        project_path = project["path_with_namespace"]
+        if filter_pattern and not fnmatch.fnmatch(project_path, filter_pattern):
+            logger.debug(f"Skipping project (filter): {project_path}")
+            continue
+        operation.apply_to_project(project["id"], project_path)
 
 
 # ---------------------------------------------------------------------------
@@ -667,6 +679,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="GitLab instance URL (default: from GITLAB_URL env or https://gitlab.com)")
     parser.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES,
                         help=f"Maximum retry attempts for transient errors (default: {DEFAULT_MAX_RETRIES})")
+    parser.add_argument("--filter", dest="filter_pattern", default=None,
+                        help="Glob pattern to filter projects by path (e.g., 'myorg/team-*/*')")
 
     subparsers = parser.add_subparsers(dest="operation", required=True,
                                         help="Operation to perform")
@@ -717,7 +731,7 @@ def main() -> int:
     operation = op_cls(client=client, args=args)
 
     try:
-        recurse(client, target, operation)
+        recurse(client, target, operation, filter_pattern=args.filter_pattern)
     except requests.HTTPError as e:
         logger.error(f"Fatal API error: {e}")
         return 1
