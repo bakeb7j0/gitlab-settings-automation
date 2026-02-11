@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import responses
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -17,6 +16,7 @@ from gl_settings import GitLabClient, Target, TargetType
 # but these constants need to be imported directly from tests
 MOCK_GITLAB_URL = "https://gitlab.example.com"
 MOCK_API_URL = f"{MOCK_GITLAB_URL}/api/v4"
+
 
 @pytest.fixture
 def mock_client():

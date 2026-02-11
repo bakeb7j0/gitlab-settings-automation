@@ -12,18 +12,34 @@ export GITLAB_TOKEN="glpat-xxxxxxxxxxxxxxxxxxxx"
 export GITLAB_URL="https://gitlab.mycompany.com"
 
 # Dry-run a branch protection across a whole group
-python3 gl_settings.py --dry-run protect-branch https://gitlab.com/myorg \
+gl-settings --dry-run protect-branch https://gitlab.com/myorg \
     --branch release/1.2 --push no_access --merge no_access
 
 # Apply it for real
-python3 gl_settings.py protect-branch https://gitlab.com/myorg/myproject \
+gl-settings protect-branch https://gitlab.com/myorg/myproject \
     --branch release/1.2 --push no_access --merge no_access
 ```
 
-## Requirements
+## Installation
+
+### From source (recommended for development)
+
+```bash
+git clone https://github.com/bakeb7j0/gitlab-settings-automation.git
+cd gitlab-settings-automation
+make install-dev
+```
+
+### From source (user install)
+
+```bash
+pip install git+https://github.com/bakeb7j0/gitlab-settings-automation.git
+```
+
+### Requirements
 
 - Python 3.10+
-- `requests` library (`pip install requests`)
+- `requests` library (installed automatically)
 
 ## How It Works
 
@@ -109,3 +125,21 @@ The tool is designed as a building block. See `examples/release-lockdown.sh` for
 4. Optionally implement `applies_to_group()` and `apply_to_group()`
 
 The operation is automatically available as a CLI subcommand.
+
+## Development
+
+```bash
+make install-dev  # Install with dev dependencies
+make test         # Run tests
+make lint         # Check code style
+make format       # Auto-format code
+make typecheck    # Run type checker
+make clean        # Remove build artifacts
+```
+
+## CI/CD
+
+This project uses GitHub Actions for continuous integration:
+- **Lint**: Runs `ruff check` and `ruff format --check`
+- **Test**: Runs pytest on Python 3.10, 3.11, and 3.12
+- **Typecheck**: Runs mypy for type checking

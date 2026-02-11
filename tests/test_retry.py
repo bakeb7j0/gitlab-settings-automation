@@ -16,10 +16,10 @@ MOCK_GITLAB_URL = "https://gitlab.example.com"
 MOCK_API_URL = f"{MOCK_GITLAB_URL}/api/v4"
 
 from gl_settings import (
-    GitLabClient,
-    RETRYABLE_STATUS_CODES,
-    RETRY_BACKOFF_FACTOR,
     DEFAULT_MAX_RETRIES,
+    RETRY_BACKOFF_FACTOR,
+    RETRYABLE_STATUS_CODES,
+    GitLabClient,
 )
 
 

@@ -4,7 +4,6 @@ import argparse
 import sys
 from pathlib import Path
 
-import pytest
 import responses
 
 # Add parent directory to path for imports
@@ -28,11 +27,12 @@ def make_args(**kwargs) -> argparse.Namespace:
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)
 
+
 from gl_settings import (
     GitLabClient,
+    ProtectBranchOperation,
     Target,
     TargetType,
-    ProtectBranchOperation,
     recurse,
 )
 
@@ -323,6 +323,8 @@ class TestFilterFlag:
         # We should have: 3 subgroup GETs + 3 project GETs + 1 branch GET + 1 branch POST
         subgroup_calls = [c for c in responses.calls if "/subgroups" in c.request.url]
         # Note: project list calls have /groups/N/projects (may have query params)
-        project_list_calls = [c for c in responses.calls if "/groups/" in c.request.url and "/projects" in c.request.url]
+        project_list_calls = [
+            c for c in responses.calls if "/groups/" in c.request.url and "/projects" in c.request.url
+        ]
         assert len(subgroup_calls) == 3  # All groups traversed
         assert len(project_list_calls) == 3  # All groups' projects queried

@@ -4,7 +4,6 @@ import argparse
 import sys
 from pathlib import Path
 
-import pytest
 import responses
 
 # Add parent directory to path for imports
@@ -28,12 +27,13 @@ def make_args(**kwargs) -> argparse.Namespace:
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)
 
+
 from gl_settings import (
+    ApprovalRuleOperation,
     GitLabClient,
+    ProjectSettingOperation,
     ProtectBranchOperation,
     ProtectTagOperation,
-    ProjectSettingOperation,
-    ApprovalRuleOperation,
 )
 
 
