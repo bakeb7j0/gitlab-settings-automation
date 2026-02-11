@@ -34,6 +34,7 @@ import json
 import logging
 import os
 import sys
+import time
 import urllib.parse
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -49,6 +50,11 @@ import requests
 DEFAULT_GITLAB_URL = "https://gitlab.com"
 API_V4 = "/api/v4"
 PER_PAGE = 100
+
+# Retry configuration
+DEFAULT_MAX_RETRIES = 3
+RETRY_BACKOFF_FACTOR = 0.5  # seconds
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 # GitLab access level constants
 ACCESS_LEVELS = {
@@ -143,9 +149,10 @@ def setup_logging(json_mode: bool = False, verbose: bool = False) -> logging.Log
 
 
 class GitLabClient:
-    """Thin wrapper around GitLab REST API v4 with pagination support."""
+    """Thin wrapper around GitLab REST API v4 with pagination support and retry logic."""
 
-    def __init__(self, base_url: str, token: str, dry_run: bool = False):
+    def __init__(self, base_url: str, token: str, dry_run: bool = False,
+                 max_retries: int = DEFAULT_MAX_RETRIES):
         self.base_url = base_url.rstrip("/")
         self.api_url = f"{self.base_url}{API_V4}"
         self.session = requests.Session()
@@ -154,16 +161,62 @@ class GitLabClient:
             "Content-Type": "application/json",
         })
         self.dry_run = dry_run
+        self.max_retries = max_retries
         self.logger = logging.getLogger("gl-settings")
 
     def _request(self, method: str, endpoint: str, **kwargs) -> requests.Response:
+        """Make an HTTP request with retry logic for transient failures."""
         url = f"{self.api_url}{endpoint}"
-        self.logger.debug(f"{method.upper()} {url} {kwargs.get('params', '')} {kwargs.get('json', '')}")
-        resp = self.session.request(method, url, **kwargs)
-        if resp.status_code >= 400:
-            self.logger.error(f"API error {resp.status_code}: {resp.text[:500]}")
-        resp.raise_for_status()
-        return resp
+        last_exception: Exception | None = None
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                self.logger.debug(
+                    f"{method.upper()} {url} {kwargs.get('params', '')} {kwargs.get('json', '')} "
+                    f"(attempt {attempt + 1}/{self.max_retries + 1})"
+                )
+                resp = self.session.request(method, url, **kwargs)
+
+                # Retry on rate limit or server errors
+                if resp.status_code in RETRYABLE_STATUS_CODES and attempt < self.max_retries:
+                    wait_time = self._calculate_backoff(resp, attempt)
+                    self.logger.warning(
+                        f"Retryable error {resp.status_code}, waiting {wait_time:.1f}s before retry"
+                    )
+                    time.sleep(wait_time)
+                    continue
+
+                if resp.status_code >= 400:
+                    self.logger.error(f"API error {resp.status_code}: {resp.text[:500]}")
+                resp.raise_for_status()
+                return resp
+
+            except requests.exceptions.ConnectionError as e:
+                last_exception = e
+                if attempt < self.max_retries:
+                    wait_time = RETRY_BACKOFF_FACTOR * (2 ** attempt)
+                    self.logger.warning(
+                        f"Connection error, retrying in {wait_time:.1f}s: {e}"
+                    )
+                    time.sleep(wait_time)
+                    continue
+                raise
+
+        # Should not reach here, but safety net
+        if last_exception:
+            raise last_exception
+        raise RuntimeError("Unexpected retry loop exit")
+
+    def _calculate_backoff(self, resp: requests.Response, attempt: int) -> float:
+        """Calculate backoff time, respecting Retry-After header for 429s."""
+        if resp.status_code == 429:
+            retry_after = resp.headers.get("Retry-After")
+            if retry_after:
+                try:
+                    return float(retry_after)
+                except ValueError:
+                    pass  # Fall through to exponential backoff
+        return RETRY_BACKOFF_FACTOR * (2 ** attempt)
 
     def get(self, endpoint: str, params: dict | None = None) -> Any:
         return self._request("GET", endpoint, params=params).json()
@@ -612,6 +665,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Enable debug logging")
     parser.add_argument("--gitlab-url", default=None,
                         help="GitLab instance URL (default: from GITLAB_URL env or https://gitlab.com)")
+    parser.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES,
+                        help=f"Maximum retry attempts for transient errors (default: {DEFAULT_MAX_RETRIES})")
 
     subparsers = parser.add_subparsers(dest="operation", required=True,
                                         help="Operation to perform")
@@ -641,7 +696,8 @@ def main() -> int:
     logger = setup_logging(json_mode=args.json_output, verbose=args.verbose)
 
     # Build client
-    client = GitLabClient(base_url=gitlab_url, token=token, dry_run=args.dry_run)
+    client = GitLabClient(base_url=gitlab_url, token=token, dry_run=args.dry_run,
+                          max_retries=args.max_retries)
 
     # Resolve target
     logger.info(f"Resolving target: {args.target_url}")
