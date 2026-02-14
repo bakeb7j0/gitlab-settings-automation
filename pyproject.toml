@@ -45,8 +45,11 @@ Homepage = "https://github.com/bakeb7j0/gitlab-settings-automation"
 Repository = "https://github.com/bakeb7j0/gitlab-settings-automation"
 Issues = "https://github.com/bakeb7j0/gitlab-settings-automation/issues"
 
-[tool.setuptools]
-py-modules = ["gl_settings"]
+[tool.setuptools.packages.find]
+include = ["gl_settings*"]
+
+[tool.setuptools.package-data]
+"gl_settings.templates" = ["*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

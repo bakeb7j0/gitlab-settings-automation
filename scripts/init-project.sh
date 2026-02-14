@@ -1,6 +1,10 @@
 #!/bin/bash
 # init-project.sh - Initialize a GitLab project with standard settings
 #
+# DEPRECATED: This script is deprecated. Use the gl-settings CLI instead:
+#   gl-settings init-project <project-url>
+#   gl-settings init-project --dry-run <project-url>
+#
 # This script applies the Blueshift template settings to a new or existing project.
 # It configures merge request policies, branch protection, tag protection, and
 # access controls to match organizational standards.
