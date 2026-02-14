@@ -5,6 +5,8 @@
 #   ./run-all.sh              # Run all tests
 #   ./run-all.sh --quick      # Run only core operation tests (skip slow tests)
 #   ./run-all.sh --prime      # Prime environment first, then run all tests
+#   ./run-all.sh --cleanup    # Clean up test environment after tests
+#   ./run-all.sh --prime --cleanup  # Prime, run tests, then clean up
 #
 # Environment:
 #   GITLAB_TOKEN   - Required: GitLab Personal Access Token
@@ -32,6 +34,7 @@ CORE_TESTS=(
 SCENARIO_TESTS=(
     "test-recursion.sh"
     "test-error-handling.sh"
+    "test-init-project.sh"
 )
 
 #━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -134,11 +137,46 @@ show_usage() {
     echo "Options:"
     echo "  --quick       Run only core operation tests (faster)"
     echo "  --prime       Prime the test environment before running"
+    echo "  --cleanup     Clean up (delete) test environment after tests"
     echo "  --help        Show this help message"
     echo ""
     echo "Environment:"
     echo "  GITLAB_TOKEN   Required: GitLab Personal Access Token"
     echo "  GL_TEST_GROUP  Optional: Target group (default: testtarget)"
+}
+
+cleanup_environment() {
+    print_header "Cleaning Up Test Environment"
+    echo ""
+    echo -e "${YELLOW}Deleting all projects and subgroups in ${GL_TEST_GROUP}...${NC}"
+    echo ""
+
+    # Delete all projects first
+    local projects
+    projects=$(list_group_projects "${GL_TEST_GROUP}" 2>/dev/null || echo "")
+
+    if [[ -n "$projects" ]]; then
+        while IFS= read -r project; do
+            echo -e "  ${DIM}Deleting project:${NC} $project"
+            delete_project "$project"
+            sleep 0.5
+        done <<< "$projects"
+    fi
+
+    # Delete subgroups (deepest first)
+    local subgroups
+    subgroups=$(list_subgroups "${GL_TEST_GROUP}" 2>/dev/null | sort -r || echo "")
+
+    if [[ -n "$subgroups" ]]; then
+        while IFS= read -r subgroup; do
+            echo -e "  ${DIM}Deleting subgroup:${NC} $subgroup"
+            delete_subgroup "$subgroup"
+            sleep 0.5
+        done <<< "$subgroups"
+    fi
+
+    echo ""
+    echo -e "${GREEN}✓${NC} Cleanup complete"
 }
 
 #━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -148,6 +186,7 @@ show_usage() {
 main() {
     local quick_mode=false
     local prime_first=false
+    local cleanup_after=false
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -158,6 +197,10 @@ main() {
                 ;;
             --prime)
                 prime_first=true
+                shift
+                ;;
+            --cleanup)
+                cleanup_after=true
                 shift
                 ;;
             --help|-h)
@@ -220,6 +263,11 @@ main() {
     print_final_summary
     echo "Duration: ${duration}s"
     echo ""
+
+    # Cleanup if requested
+    if $cleanup_after; then
+        cleanup_environment
+    fi
 
     # Exit with appropriate code
     if [[ $TOTAL_FAILED -gt 0 ]]; then
