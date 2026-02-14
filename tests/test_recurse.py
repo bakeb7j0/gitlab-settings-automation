@@ -28,13 +28,10 @@ def make_args(**kwargs) -> argparse.Namespace:
     return argparse.Namespace(**defaults)
 
 
-from gl_settings import (
-    GitLabClient,
-    ProtectBranchOperation,
-    Target,
-    TargetType,
-    recurse,
-)
+from gl_settings.cli import recurse
+from gl_settings.client import GitLabClient
+from gl_settings.models import Target, TargetType
+from gl_settings.operations import ProtectBranchOperation
 
 
 class TestRecursion:

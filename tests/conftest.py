@@ -10,7 +10,8 @@ import pytest
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from gl_settings import GitLabClient, Target, TargetType
+from gl_settings.client import GitLabClient
+from gl_settings.models import Target, TargetType
 
 # Constants for use in tests - pytest makes conftest.py fixtures available,
 # but these constants need to be imported directly from tests

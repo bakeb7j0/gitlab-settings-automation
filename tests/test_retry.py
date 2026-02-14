@@ -15,11 +15,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 MOCK_GITLAB_URL = "https://gitlab.example.com"
 MOCK_API_URL = f"{MOCK_GITLAB_URL}/api/v4"
 
-from gl_settings import (
+from gl_settings.client import GitLabClient
+from gl_settings.models import (
     DEFAULT_MAX_RETRIES,
     RETRY_BACKOFF_FACTOR,
     RETRYABLE_STATUS_CODES,
-    GitLabClient,
 )
 
 

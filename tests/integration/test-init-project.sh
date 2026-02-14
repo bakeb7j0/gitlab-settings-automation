@@ -1,21 +1,18 @@
 #!/bin/bash
-# test-init-project.sh - Integration tests for init-project.sh script
+# test-init-project.sh - Integration tests for gl-settings init-project subcommand
 #
 # Tests:
-#   1. Script applies all project settings
-#   2. Script creates protected branches
-#   3. Script creates protected tags
-#   4. Script installs issue templates
-#   5. Script is idempotent (second run shows already_set)
+#   1. Command applies all project settings
+#   2. Command creates protected branches
+#   3. Command creates protected tags
+#   4. Command installs issue templates
+#   5. Command is idempotent (second run shows already_set)
 #   6. Dry-run makes no changes
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib.sh"
-
-# Path to the init-project script
-INIT_SCRIPT="${SCRIPT_DIR}/../../scripts/init-project.sh"
 
 #━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # TEST CONFIGURATION
@@ -24,7 +21,7 @@ INIT_SCRIPT="${SCRIPT_DIR}/../../scripts/init-project.sh"
 PROJECT="${GL_TEST_GROUP}/project-alpha"
 PROJECT_URL="${GITLAB_URL}/${PROJECT}"
 
-# Expected settings from init-project.sh
+# Expected settings from gl-settings init-project
 declare -A EXPECTED_SETTINGS=(
     ["only_allow_merge_if_pipeline_succeeds"]="true"
     ["only_allow_merge_if_all_discussions_are_resolved"]="true"
@@ -96,7 +93,7 @@ test_applies_project_settings() {
 
     # Run init-project
     local output
-    output=$("$INIT_SCRIPT" "$PROJECT_URL" 2>&1) || true
+    output=$(gl-settings init-project "$PROJECT_URL" 2>&1) || true
 
     wait_for_gitlab 2
 
@@ -194,7 +191,7 @@ test_idempotency() {
 
     # Run init-project again
     local output
-    output=$("$INIT_SCRIPT" "$PROJECT_URL" 2>&1) || true
+    output=$(gl-settings init-project "$PROJECT_URL" 2>&1) || true
 
     # Check that protected branches show already_set
     local branch_idempotent=true
@@ -233,7 +230,7 @@ test_dry_run_no_changes() {
 
     # Run with --dry-run
     local output
-    output=$("$INIT_SCRIPT" --dry-run "$PROJECT_URL" 2>&1) || true
+    output=$(gl-settings --dry-run init-project "$PROJECT_URL" 2>&1) || true
 
     # Verify output indicates dry-run
     if [[ "$output" != *"DRY-RUN"* ]] && [[ "$output" != *"would"* ]]; then
@@ -269,24 +266,24 @@ test_dry_run_no_changes() {
 #━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 main() {
-    print_header "init-project.sh Tests"
+    print_header "gl-settings init-project Tests"
     check_environment
 
-    # Verify init script exists
-    if [[ ! -x "$INIT_SCRIPT" ]]; then
-        log_error "Init script not found or not executable: $INIT_SCRIPT"
+    # Verify gl-settings is available
+    if ! command -v gl-settings &>/dev/null; then
+        log_error "gl-settings CLI not found. Install with: pip install -e ."
         exit 1
     fi
 
-    suite_start "INIT: init-project.sh"
+    suite_start "INIT: gl-settings init-project"
 
     # Reset project to known state before testing
     log_info "Resetting project to clean state..."
     reset_project
 
-    # Run the init script once to set everything up
-    log_info "Running init-project.sh..."
-    "$INIT_SCRIPT" "$PROJECT_URL" >/dev/null 2>&1 || true
+    # Run init-project once to set everything up
+    log_info "Running gl-settings init-project..."
+    gl-settings init-project "$PROJECT_URL" >/dev/null 2>&1 || true
     wait_for_gitlab 2
 
     # Now run the tests

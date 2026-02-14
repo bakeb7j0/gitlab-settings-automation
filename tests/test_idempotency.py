@@ -28,9 +28,9 @@ def make_args(**kwargs) -> argparse.Namespace:
     return argparse.Namespace(**defaults)
 
 
-from gl_settings import (
+from gl_settings.client import GitLabClient
+from gl_settings.operations import (
     ApprovalRuleOperation,
-    GitLabClient,
     ProjectSettingOperation,
     ProtectBranchOperation,
     ProtectTagOperation,
