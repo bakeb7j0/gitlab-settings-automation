@@ -48,6 +48,10 @@ class InitProjectOperation(Operation):
         "v*": "maintainer",
     }
 
+    # Default release branch to create and set as default
+    DEFAULT_RELEASE_BRANCH = "release/0.0.1"
+    DEFAULT_RELEASE_SOURCE = "main"
+
     # Issue templates to install (relative to templates directory)
     DEFAULT_TEMPLATES = ["bug.md", "chore.md", "docs.md", "feature.md"]
 
@@ -78,6 +82,11 @@ class InitProjectOperation(Operation):
             action="store_true",
             help="Skip merge request approval settings",
         )
+        parser.add_argument(
+            "--skip-release-branch",
+            action="store_true",
+            help="Skip creating release branch and setting it as default",
+        )
 
     def apply_to_project(self, project_id: int, project_path: str) -> ActionResult:
         """Apply all initialization steps to a project."""
@@ -93,19 +102,24 @@ class InitProjectOperation(Operation):
             result = self._apply_mr_settings(project_id, project_path)
             results.append(result)
 
-        # 3. Protected branches
+        # 3. Create release branch and set as default
+        if not self.args.skip_release_branch:
+            result = self._create_release_branch(project_id, project_path)
+            results.append(result)
+
+        # 4. Protected branches
         if not self.args.skip_branches:
             for branch, (push, merge, force_push) in self.DEFAULT_PROTECTED_BRANCHES.items():
                 result = self._protect_branch(project_id, project_path, branch, push, merge, force_push)
                 results.append(result)
 
-        # 4. Protected tags
+        # 5. Protected tags
         if not self.args.skip_tags:
             for tag, create_level in self.DEFAULT_PROTECTED_TAGS.items():
                 result = self._protect_tag(project_id, project_path, tag, create_level)
                 results.append(result)
 
-        # 5. Issue templates
+        # 6. Issue templates
         if not self.args.skip_templates:
             for template in self.DEFAULT_TEMPLATES:
                 result = self._install_template(project_id, project_path, template)
@@ -281,6 +295,116 @@ class InitProjectOperation(Operation):
                     detail=str(e),
                 )
             )
+
+    def _create_release_branch(self, project_id: int, project_path: str) -> ActionResult:
+        """Create a release branch from main and set it as the default branch."""
+        branch_name = self.DEFAULT_RELEASE_BRANCH
+        source_ref = self.DEFAULT_RELEASE_SOURCE
+
+        # Check if branch already exists
+        encoded_branch = urllib.parse.quote(branch_name, safe="")
+        try:
+            self.client.get(f"/projects/{project_id}/repository/branches/{encoded_branch}")
+            branch_exists = True
+        except requests.HTTPError as e:
+            if e.response.status_code == 404:
+                branch_exists = False
+            else:
+                return self._record(
+                    ActionResult(
+                        target_type="project",
+                        target_path=project_path,
+                        target_id=project_id,
+                        operation=f"init-project:release-branch:{branch_name}",
+                        action="error",
+                        detail=str(e),
+                    )
+                )
+
+        # Check current default branch
+        try:
+            project = self.client.get(f"/projects/{project_id}")
+            current_default = project.get("default_branch", "main")
+        except requests.HTTPError as e:
+            return self._record(
+                ActionResult(
+                    target_type="project",
+                    target_path=project_path,
+                    target_id=project_id,
+                    operation=f"init-project:release-branch:{branch_name}",
+                    action="error",
+                    detail=f"Failed to get project: {e}",
+                )
+            )
+
+        # Already done?
+        if branch_exists and current_default == branch_name:
+            return self._record(
+                ActionResult(
+                    target_type="project",
+                    target_path=project_path,
+                    target_id=project_id,
+                    operation=f"init-project:release-branch:{branch_name}",
+                    action="already_set",
+                    detail="branch exists and is default",
+                )
+            )
+
+        action = "would_apply" if self.client.dry_run else "applied"
+        if not self.client.dry_run:
+            # Create the branch if it doesn't exist
+            if not branch_exists:
+                try:
+                    self.client.post(
+                        f"/projects/{project_id}/repository/branches",
+                        data={"branch": branch_name, "ref": source_ref},
+                    )
+                except requests.HTTPError as e:
+                    return self._record(
+                        ActionResult(
+                            target_type="project",
+                            target_path=project_path,
+                            target_id=project_id,
+                            operation=f"init-project:release-branch:{branch_name}",
+                            action="error",
+                            detail=f"Failed to create branch: {e}",
+                        )
+                    )
+
+            # Set as default branch
+            if current_default != branch_name:
+                try:
+                    self.client.put(f"/projects/{project_id}", data={"default_branch": branch_name})
+                except requests.HTTPError as e:
+                    return self._record(
+                        ActionResult(
+                            target_type="project",
+                            target_path=project_path,
+                            target_id=project_id,
+                            operation=f"init-project:release-branch:{branch_name}",
+                            action="error",
+                            detail=f"Failed to set default branch: {e}",
+                        )
+                    )
+
+        detail_parts = []
+        if not branch_exists:
+            detail_parts.append(f"created from {source_ref}")
+        if current_default != branch_name:
+            detail_parts.append(f"set as default (was {current_default})")
+        detail = ", ".join(detail_parts)
+
+        return self._record(
+            ActionResult(
+                target_type="project",
+                target_path=project_path,
+                target_id=project_id,
+                operation=f"init-project:release-branch:{branch_name}",
+                action=action,
+                detail=detail,
+                dry_run=self.client.dry_run,
+            )
+        )
 
     def _protect_branch(
         self, project_id: int, project_path: str, branch: str, push: str, merge: str, force_push: bool
