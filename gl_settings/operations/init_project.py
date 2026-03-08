@@ -39,7 +39,7 @@ class InitProjectOperation(Operation):
     # Protected branches: name -> (push_level, merge_level, allow_force_push)
     DEFAULT_PROTECTED_BRANCHES = {
         "main": ("maintainer", "maintainer", False),
-        "release/*": ("maintainer", "maintainer", True),
+        "release/*": ("no_access", "maintainer", False),
     }
 
     # Protected tags: pattern -> create_level
