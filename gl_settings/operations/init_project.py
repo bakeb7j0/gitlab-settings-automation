@@ -107,22 +107,23 @@ class InitProjectOperation(Operation):
             result = self._create_release_branch(project_id, project_path)
             results.append(result)
 
-        # 4. Protected branches
+        # 4. Issue templates (before branch protection, since protection
+        #    blocks commits and templates use the Repository Files API)
+        if not self.args.skip_templates:
+            for template in self.DEFAULT_TEMPLATES:
+                result = self._install_template(project_id, project_path, template)
+                results.append(result)
+
+        # 5. Protected branches (after templates, since release/* has no_access push)
         if not self.args.skip_branches:
             for branch, (push, merge, force_push) in self.DEFAULT_PROTECTED_BRANCHES.items():
                 result = self._protect_branch(project_id, project_path, branch, push, merge, force_push)
                 results.append(result)
 
-        # 5. Protected tags
+        # 6. Protected tags
         if not self.args.skip_tags:
             for tag, create_level in self.DEFAULT_PROTECTED_TAGS.items():
                 result = self._protect_tag(project_id, project_path, tag, create_level)
-                results.append(result)
-
-        # 6. Issue templates
-        if not self.args.skip_templates:
-            for template in self.DEFAULT_TEMPLATES:
-                result = self._install_template(project_id, project_path, template)
                 results.append(result)
 
         # Summarize
