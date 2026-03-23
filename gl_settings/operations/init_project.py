@@ -107,14 +107,19 @@ class InitProjectOperation(Operation):
             result = self._create_release_branch(project_id, project_path)
             results.append(result)
 
-        # 4. Issue templates (before branch protection, since protection
-        #    blocks commits and templates use the Repository Files API)
+        # 4. Issue templates — if the default branch is protected with no_access,
+        #    temporarily unprotect it so the Repository Files API can commit.
         if not self.args.skip_templates:
-            for template in self.DEFAULT_TEMPLATES:
-                result = self._install_template(project_id, project_path, template)
-                results.append(result)
+            unprotected_branch = self._ensure_default_branch_writable(project_id)
+            try:
+                for template in self.DEFAULT_TEMPLATES:
+                    result = self._install_template(project_id, project_path, template)
+                    results.append(result)
+            finally:
+                if unprotected_branch:
+                    self._reprotect_branch(project_id, unprotected_branch)
 
-        # 5. Protected branches (after templates, since release/* has no_access push)
+        # 5. Protected branches
         if not self.args.skip_branches:
             for branch, (push, merge, force_push) in self.DEFAULT_PROTECTED_BRANCHES.items():
                 result = self._protect_branch(project_id, project_path, branch, push, merge, force_push)
@@ -406,6 +411,68 @@ class InitProjectOperation(Operation):
                 dry_run=self.client.dry_run,
             )
         )
+
+    def _ensure_default_branch_writable(self, project_id: int) -> str | None:
+        """If the default branch is protected with no_access push, temporarily unprotect it.
+
+        Returns the branch name that was unprotected, or None if no action was needed.
+        """
+        if self.client.dry_run:
+            return None
+
+        try:
+            project = self.client.get(f"/projects/{project_id}")
+            default_branch = project.get("default_branch", "main")
+        except requests.HTTPError:
+            return None
+
+        # Check if the default branch matches a protected wildcard or exact rule
+        # that blocks pushes. We check the exact branch name and any wildcard
+        # patterns that might match it.
+        branches_to_check = [default_branch]
+        # If default branch matches release/*, also check the wildcard rule
+        if default_branch.startswith("release/"):
+            branches_to_check.append("release/*")
+
+        for branch_pattern in branches_to_check:
+            encoded = urllib.parse.quote(branch_pattern, safe="")
+            try:
+                existing = self.client.get(f"/projects/{project_id}/protected_branches/{encoded}")
+                push_level = self._max_access_level(existing.get("push_access_levels", []))
+                if push_level == ACCESS_LEVELS["no_access"]:
+                    self.logger.debug(f"Temporarily unprotecting {branch_pattern} for template installation")
+                    self.client.delete(f"/projects/{project_id}/protected_branches/{encoded}")
+                    return branch_pattern
+            except requests.HTTPError:
+                continue
+
+        return None
+
+    def _reprotect_branch(self, project_id: int, branch_pattern: str) -> None:
+        """Re-protect a branch that was temporarily unprotected for template installation."""
+        if self.client.dry_run:
+            return
+
+        # Look up the intended protection settings
+        settings = self.DEFAULT_PROTECTED_BRANCHES.get(branch_pattern)
+        if not settings:
+            self.logger.warning(f"No default protection settings found for {branch_pattern}, skipping re-protect")
+            return
+
+        push, merge, force_push = settings
+        try:
+            self.client.post(
+                f"/projects/{project_id}/protected_branches",
+                data={
+                    "name": branch_pattern,
+                    "push_access_level": ACCESS_LEVELS[push],
+                    "merge_access_level": ACCESS_LEVELS[merge],
+                    "allow_force_push": force_push,
+                },
+            )
+            self.logger.debug(f"Re-protected {branch_pattern} after template installation")
+        except requests.HTTPError as e:
+            self.logger.warning(f"Failed to re-protect {branch_pattern}: {e}")
 
     def _protect_branch(
         self, project_id: int, project_path: str, branch: str, push: str, merge: str, force_push: bool
