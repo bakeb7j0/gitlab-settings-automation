@@ -219,6 +219,7 @@ class TestApprovalRuleIdempotency:
             add_users=[],
             remove_users=[],
             unprotect=False,
+            protected_branch_ids=[],
         )
         op = ApprovalRuleOperation(client, args)
         result = op.apply_to_project(123, "myorg/myproject")
@@ -254,6 +255,7 @@ class TestApprovalRuleIdempotency:
             add_users=[],
             remove_users=[],
             unprotect=False,
+            protected_branch_ids=[],
         )
         op = ApprovalRuleOperation(client, args)
         result = op.apply_to_project(123, "myorg/myproject")

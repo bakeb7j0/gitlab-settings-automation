@@ -294,6 +294,48 @@ gl-settings --dry-run push-rule https://gitlab.com/myorg \
 
 ---
 
+### `kahuna-sandbox`
+
+Composite operation that applies the full KAHUNA integration-branch sandbox configuration to a project. Delegates to `push-rule`, `protect-branch`, `approval-rule`, and `project-setting` so all idempotency and dry-run behavior is inherited from the single-purpose operations.
+
+```bash
+gl-settings kahuna-sandbox <target> [--branch-name-regex "<regex>"]
+```
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `--branch-name-regex` | No | Push-rule regex (default accepts `main`, `develop`, `feature/*`, `fix/*`, `kahuna/*`) |
+
+**Knobs applied:**
+
+1. **Push rule** — `branch_name_regex` widened to include `kahuna/*`
+2. **Protected branch** — `kahuna/*` pattern protected (developer push + developer merge)
+3. **Approval rule** — `kahuna-zero-approvals` with `approvals_required=0` (per-branch scope via knob 2)
+4. **Project settings** — `only_allow_merge_if_pipeline_succeeds=true`, `squash_option=default_on`, `merge_pipelines_enabled=true`, `merge_trains_enabled=true`
+
+Merge trains are **enabled**, not disabled: they batch multiple flight MRs into one pipeline run, which is the throughput story KAHUNA needs. Main branch protection is untouched.
+
+**Behavior:**
+
+- Sub-ops run in order (1 → 4). If any fails, later sub-ops are skipped and the composite returns `action="error"` with the failing sub-op named in `detail`.
+- Idempotent end-to-end: if all 4 knobs are already matched, the composite returns `action="already_set"` with no writes.
+- `--dry-run` propagates to every sub-op; reports drift via `action="would_apply"`.
+
+**Examples:**
+
+```bash
+# Apply KAHUNA sandbox to one project
+gl-settings kahuna-sandbox https://gitlab.com/myorg/myproject
+
+# Apply across a whole group
+gl-settings kahuna-sandbox https://gitlab.com/myorg
+
+# Dry-run across a group to audit which projects are drifted
+gl-settings --dry-run kahuna-sandbox https://gitlab.com/myorg
+```
+
+---
+
 ## Global Flags
 
 | Flag | Description |

@@ -35,6 +35,19 @@ class ApprovalRuleOperation(Operation):
             help="Remove user (username or ID, repeatable)",
         )
         parser.add_argument("--unprotect", action="store_true", help="Delete the approval rule")
+        parser.add_argument(
+            "--protected-branch-id",
+            type=int,
+            action="append",
+            dest="protected_branch_ids",
+            default=[],
+            metavar="ID",
+            help=(
+                "Scope the rule to a specific protected-branch ID (repeatable). "
+                "Without this flag the rule applies project-wide to all branches. "
+                "Required for per-branch-pattern rules (e.g. kahuna/*)."
+            ),
+        )
 
     def apply_to_project(self, project_id: int, project_path: str) -> ActionResult:
         rule_name = self.args.rule_name
@@ -82,17 +95,21 @@ class ApprovalRuleOperation(Operation):
             )
 
         user_ids = self._resolve_users(self.args.add_users)
+        protected_branch_ids = list(self.args.protected_branch_ids)
 
         action = "would_apply" if self.client.dry_run else "applied"
         if not self.client.dry_run:
+            payload: dict = {
+                "name": rule_name,
+                "approvals_required": self.args.approvals,
+                "user_ids": user_ids,
+            }
+            if protected_branch_ids:
+                payload["protected_branch_ids"] = protected_branch_ids
             try:
                 self.client.post(
                     f"/projects/{project_id}/approval_rules",
-                    data={
-                        "name": rule_name,
-                        "approvals_required": self.args.approvals,
-                        "user_ids": user_ids,
-                    },
+                    data=payload,
                 )
             except requests.HTTPError as e:
                 return self._record(
@@ -106,6 +123,7 @@ class ApprovalRuleOperation(Operation):
                     )
                 )
 
+        scope = f"scoped to protected branches {protected_branch_ids}" if protected_branch_ids else "project-wide"
         return self._record(
             ActionResult(
                 target_type="project",
@@ -113,7 +131,7 @@ class ApprovalRuleOperation(Operation):
                 target_id=project_id,
                 operation=f"approval-rule:{rule_name}",
                 action=action,
-                detail=f"created with {self.args.approvals} approvals, {len(user_ids)} users",
+                detail=f"created with {self.args.approvals} approvals, {len(user_ids)} users ({scope})",
                 dry_run=self.client.dry_run,
             )
         )
@@ -126,6 +144,7 @@ class ApprovalRuleOperation(Operation):
         # Calculate desired state
         current_approvals = existing.get("approvals_required", 0)
         current_user_ids = set(u["id"] for u in existing.get("users", []))
+        current_branch_ids = set(b["id"] for b in existing.get("protected_branches", []))
 
         desired_approvals = self.args.approvals if self.args.approvals is not None else current_approvals
 
@@ -133,8 +152,19 @@ class ApprovalRuleOperation(Operation):
         remove_user_ids = set(self._resolve_users(self.args.remove_users))
         desired_user_ids = (current_user_ids | add_user_ids) - remove_user_ids
 
+        # When protected_branch_ids is passed, treat it as the desired scope.
+        # When not passed (empty list), preserve the current scope so this flag
+        # is additive — unscoped callers don't accidentally reset a rule's scope.
+        desired_branch_ids = (
+            set(self.args.protected_branch_ids) if self.args.protected_branch_ids else current_branch_ids
+        )
+
         # Check if anything changed
-        if current_approvals == desired_approvals and current_user_ids == desired_user_ids:
+        if (
+            current_approvals == desired_approvals
+            and current_user_ids == desired_user_ids
+            and current_branch_ids == desired_branch_ids
+        ):
             return self._record(
                 ActionResult(
                     target_type="project",
@@ -142,19 +172,25 @@ class ApprovalRuleOperation(Operation):
                     target_id=project_id,
                     operation=f"approval-rule:{rule_name}",
                     action="already_set",
-                    detail=f"approvals={current_approvals}, users={len(current_user_ids)}",
+                    detail=(
+                        f"approvals={current_approvals}, users={len(current_user_ids)}, "
+                        f"branches={sorted(current_branch_ids) or 'project-wide'}"
+                    ),
                 )
             )
 
         action = "would_apply" if self.client.dry_run else "applied"
         if not self.client.dry_run:
+            payload: dict = {
+                "approvals_required": desired_approvals,
+                "user_ids": list(desired_user_ids),
+            }
+            if desired_branch_ids != current_branch_ids:
+                payload["protected_branch_ids"] = sorted(desired_branch_ids)
             try:
                 self.client.put(
                     f"/projects/{project_id}/approval_rules/{rule_id}",
-                    data={
-                        "approvals_required": desired_approvals,
-                        "user_ids": list(desired_user_ids),
-                    },
+                    data=payload,
                 )
             except requests.HTTPError as e:
                 return self._record(
@@ -174,6 +210,8 @@ class ApprovalRuleOperation(Operation):
             changes.append(f"approvals: {current_approvals} -> {desired_approvals}")
         if current_user_ids != desired_user_ids:
             changes.append(f"users: {len(current_user_ids)} -> {len(desired_user_ids)}")
+        if current_branch_ids != desired_branch_ids:
+            changes.append(f"branches: {sorted(current_branch_ids) or 'all'} -> {sorted(desired_branch_ids) or 'all'}")
 
         return self._record(
             ActionResult(
