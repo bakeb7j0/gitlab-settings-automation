@@ -3,6 +3,7 @@
 from gl_settings.operations.approval_rule import ApprovalRuleOperation
 from gl_settings.operations.base import Operation, get_operation_registry, register_operation
 from gl_settings.operations.init_project import InitProjectOperation
+from gl_settings.operations.kahuna_sandbox import KahunaSandboxOperation
 from gl_settings.operations.merge_request_setting import MergeRequestSettingOperation
 from gl_settings.operations.project_setting import ProjectSettingOperation
 
@@ -22,4 +23,5 @@ __all__ = [
     "MergeRequestSettingOperation",
     "InitProjectOperation",
     "PushRuleOperation",
+    "KahunaSandboxOperation",
 ]

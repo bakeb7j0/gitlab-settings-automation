@@ -156,6 +156,7 @@ class TestDryRunApprovalRule:
             add_users=[],
             remove_users=[],
             unprotect=False,
+            protected_branch_ids=[],
         )
         op = ApprovalRuleOperation(client, args)
         result = op.apply_to_project(123, "myorg/myproject")
@@ -182,6 +183,7 @@ class TestDryRunApprovalRule:
             add_users=[],
             remove_users=[],
             unprotect=True,
+            protected_branch_ids=[],
         )
         op = ApprovalRuleOperation(client, args)
         result = op.apply_to_project(123, "myorg/myproject")
@@ -295,7 +297,9 @@ class TestDryRunOnlyGets:
         op2.apply_to_project(123, "myorg/myproject")
 
         # Test approval-rule
-        args3 = make_args(rule_name="Test", approvals=1, add_users=[], remove_users=[], unprotect=False)
+        args3 = make_args(
+            rule_name="Test", approvals=1, add_users=[], remove_users=[], unprotect=False, protected_branch_ids=[]
+        )
         op3 = ApprovalRuleOperation(client, args3)
         op3.apply_to_project(123, "myorg/myproject")
 
