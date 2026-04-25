@@ -9,6 +9,7 @@ from gl_settings.operations.project_setting import ProjectSettingOperation
 # Import all operations to register them
 from gl_settings.operations.protect_branch import ProtectBranchOperation
 from gl_settings.operations.protect_tag import ProtectTagOperation
+from gl_settings.operations.push_rule import PushRuleOperation
 
 __all__ = [
     "Operation",
@@ -20,4 +21,5 @@ __all__ = [
     "ApprovalRuleOperation",
     "MergeRequestSettingOperation",
     "InitProjectOperation",
+    "PushRuleOperation",
 ]

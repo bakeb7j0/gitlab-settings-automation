@@ -261,6 +261,39 @@ gl-settings merge-request-setting https://gitlab.com/myorg/internal \
 
 ---
 
+### `push-rule`
+
+Manage project push rules — currently the `branch_name_regex` field. Useful for widening branch-name policies at scale (e.g. to accept a new prefix like `kahuna/*` across many projects).
+
+```bash
+gl-settings push-rule <target> --branch-name-regex "<regex>"
+```
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `--branch-name-regex` | Yes | Regex all branch names must match |
+
+**Behavior:**
+
+- Per-project only (group URLs recurse over contained projects via the standard mechanism).
+- GitLab's push-rule API is asymmetric: the first write to a project uses `POST /projects/:id/push_rule`; updates use `PUT`. The operation handles both transparently.
+- Idempotent — GET first, no-op if the current regex matches desired.
+- `--dry-run` flags drift (`would_apply`) without writing.
+
+**Examples:**
+
+```bash
+# Widen regex across a whole group so kahuna/* branches are accepted
+gl-settings push-rule https://gitlab.com/myorg \
+    --branch-name-regex '^(main|develop|kahuna/.*|feature/.*|fix/.*)$'
+
+# Dry-run to report which projects are drifted
+gl-settings --dry-run push-rule https://gitlab.com/myorg \
+    --branch-name-regex '^(main|develop|kahuna/.*|feature/.*|fix/.*)$'
+```
+
+---
+
 ## Global Flags
 
 | Flag | Description |
