@@ -105,15 +105,20 @@ def _mock_greenfield_project():
         },
     )
 
-    # 4. project-setting: GET current -> PUT changes
+    # 4. project-setting: GET current -> PUT changes.
+    # Current state models the REAL migration case: a project configured by the
+    # pre-queue-less release, i.e. trains and merged-results pipelines ON. This is
+    # what makes the disable path actually execute — if the fixture already said
+    # False, those keys would never appear in a PUT body and deleting them from
+    # SANDBOX_PROJECT_SETTINGS would leave the suite green.
     responses.add(
         responses.GET,
         f"{MOCK_API_URL}/projects/{PROJECT_ID}",
         json={
             "only_allow_merge_if_pipeline_succeeds": False,
             "squash_option": "default_off",
-            "merge_pipelines_enabled": False,
-            "merge_trains_enabled": False,
+            "merge_pipelines_enabled": True,
+            "merge_trains_enabled": True,
         },
     )
     responses.add(
@@ -144,6 +149,36 @@ class TestKahunaSandboxHappyPath:
         assert write_urls[1].endswith(f"/projects/{PROJECT_ID}/protected_branches")
         assert write_urls[2].endswith(f"/projects/{PROJECT_ID}/approval_rules")
         assert write_urls[3].endswith(f"/projects/{PROJECT_ID}")
+
+    @responses.activate
+    def test_project_setting_put_disables_trains_and_keeps_ci_gate(self):
+        """CRITICAL: the project-setting PUT must turn merge trains and
+        merged-results pipelines OFF (queue-less policy) while leaving the CI
+        gate and squash-on-merge ON. Without this assertion, deleting the
+        merge_trains_enabled / merge_pipelines_enabled entries from
+        SANDBOX_PROJECT_SETTINGS would leave the whole suite green.
+        """
+        import json
+
+        _mock_greenfield_project()
+
+        client = GitLabClient(MOCK_GITLAB_URL, "test-token")
+        op = KahunaSandboxOperation(client, make_args())
+        op.apply_to_project(PROJECT_ID, PROJECT_PATH)
+
+        put_calls = [
+            c
+            for c in responses.calls
+            if c.request.method == "PUT" and c.request.url.rstrip("/").endswith(f"/projects/{PROJECT_ID}")
+        ]
+        assert len(put_calls) == 1, [c.request.url for c in responses.calls]
+
+        body = json.loads(put_calls[0].request.body or "{}")
+        assert body["merge_trains_enabled"] is False, body
+        assert body["merge_pipelines_enabled"] is False, body
+        # The CI gate is NOT what we removed — it must survive.
+        assert body["only_allow_merge_if_pipeline_succeeds"] is True, body
+        assert body["squash_option"] == "default_on", body
 
     @responses.activate
     def test_approval_rule_post_is_scoped_to_kahuna_protected_branch(self):
@@ -233,8 +268,8 @@ class TestKahunaSandboxIdempotency:
             json={
                 "only_allow_merge_if_pipeline_succeeds": True,
                 "squash_option": "default_on",
-                "merge_pipelines_enabled": True,
-                "merge_trains_enabled": True,
+                "merge_pipelines_enabled": False,
+                "merge_trains_enabled": False,
             },
         )
 

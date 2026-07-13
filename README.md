@@ -311,9 +311,21 @@ gl-settings kahuna-sandbox <target> [--branch-name-regex "<regex>"]
 1. **Push rule** — `branch_name_regex` widened to include `kahuna/*`
 2. **Protected branch** — `kahuna/*` pattern protected (developer push + developer merge)
 3. **Approval rule** — `kahuna-zero-approvals` with `approvals_required=0` (per-branch scope via knob 2)
-4. **Project settings** — `only_allow_merge_if_pipeline_succeeds=true`, `squash_option=default_on`, `merge_pipelines_enabled=true`, `merge_trains_enabled=true`
+4. **Project settings** — `only_allow_merge_if_pipeline_succeeds=true`, `squash_option=default_on`, `merge_pipelines_enabled=false`, `merge_trains_enabled=false`
 
-Merge trains are **enabled**, not disabled: they batch multiple flight MRs into one pipeline run, which is the throughput story KAHUNA needs. Main branch protection is untouched.
+Merge trains and merged-results pipelines are **disabled** by policy. An earlier version of this
+document claimed trains "batch multiple flight MRs into one pipeline run" — **that is false.** GitLab
+runs a pipeline *per MR in the train* and re-runs successors when a predecessor fails; stacked on
+merged-results pipelines, it cost **3 pipelines per MR** (push + merged-results + train) for a
+batching benefit that does not exist.
+
+Wave work never required a train: flights land on the `kahuna/*` integration branch, the wave engine
+reconciles them with `commutativity_verify` and dependency-ordered merges, and `kahuna→main` is a
+single serialized, trust-gated promotion. There is no concurrent-merge-to-main point for a train to
+guard.
+
+The CI gate (`only_allow_merge_if_pipeline_succeeds`) is **not** what was removed — it stays on. Main
+branch protection is untouched.
 
 **Behavior:**
 
