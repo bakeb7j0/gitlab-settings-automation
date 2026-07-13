@@ -22,7 +22,12 @@ class InitProjectOperation(Operation):
         "only_allow_merge_if_pipeline_succeeds": True,
         "only_allow_merge_if_all_discussions_are_resolved": True,
         "remove_source_branch_after_merge": True,
-        "merge_pipelines_enabled": True,
+        # Trains and merged-results pipelines OFF by policy — see
+        # kahuna_sandbox.SANDBOX_PROJECT_SETTINGS. Both are asserted explicitly:
+        # GitLab requires merged-results pipelines for trains, but relying on that
+        # cascade would let trains silently return if someone re-enables the former.
+        "merge_pipelines_enabled": False,
+        "merge_trains_enabled": False,
         "issue_branch_template": "feature/%{id}-%{title}",
         "forking_access_level": "disabled",
         "pages_access_level": "private",

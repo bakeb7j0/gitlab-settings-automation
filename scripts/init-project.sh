@@ -44,7 +44,9 @@ declare -A PROJECT_SETTINGS=(
     ["only_allow_merge_if_pipeline_succeeds"]="true"
     ["only_allow_merge_if_all_discussions_are_resolved"]="true"
     ["remove_source_branch_after_merge"]="true"
-    ["merge_pipelines_enabled"]="true"
+    # Queue-less policy: trains and merged-results pipelines OFF.
+    ["merge_pipelines_enabled"]="false"
+    ["merge_trains_enabled"]="false"
     ["issue_branch_template"]="feature/%{id}-%{title}"
 
     # Access controls

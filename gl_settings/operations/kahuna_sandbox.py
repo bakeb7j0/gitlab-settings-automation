@@ -13,8 +13,8 @@ Sub-ops applied, in order:
 2. ``protect-branch`` — protect ``kahuna/*`` pattern (prerequisite for 3).
 3. ``approval-rule`` — per-branch rule with ``approvals_required=0`` scoped
    to the protected ``kahuna/*`` pattern.
-4. ``project-setting`` — enable CI-gate, squash-on-merge, and merge trains
-   so flight-MRs batch into a single pipeline run per train.
+4. ``project-setting`` — enable CI-gate and squash-on-merge. Merge trains and
+   merged-results pipelines are deliberately OFF (see ``SANDBOX_PROJECT_SETTINGS``).
 """
 
 from __future__ import annotations
@@ -38,11 +38,22 @@ KAHUNA_BRANCH_PATTERN = "kahuna/*"
 KAHUNA_APPROVAL_RULE_NAME = "kahuna-zero-approvals"
 
 # Sandbox-enabling project settings.
+#
+# Merge trains and merged-results pipelines are OFF by policy. A train does not
+# batch flight-MRs into one pipeline run — GitLab runs a pipeline per MR in the
+# train and re-runs successors when a predecessor fails. With merged-results
+# pipelines on top, that cost 3 pipelines per MR (push + merged-results + train).
+# Wave work never needed either: flights land on the kahuna branch, the engine
+# reconciles them with commutativity_verify + dependency-ordered merges, and
+# kahuna->main is a single serialized trust-gated promotion.
+#
+# The CI gate (only_allow_merge_if_pipeline_succeeds) is NOT what we removed —
+# it stays on. Only the train/merged-results machinery is gone.
 SANDBOX_PROJECT_SETTINGS: dict[str, bool | str] = {
     "only_allow_merge_if_pipeline_succeeds": True,
     "squash_option": "default_on",
-    "merge_pipelines_enabled": True,
-    "merge_trains_enabled": True,
+    "merge_pipelines_enabled": False,
+    "merge_trains_enabled": False,
 }
 
 
@@ -139,7 +150,7 @@ class KahunaSandboxOperation(Operation):
         if _is_error(sub_results[-1]):
             return self._summarize(project_id, project_path, sub_results)
 
-        # 4. project-setting — CI-gate + squash + merge trains
+        # 4. project-setting — CI-gate + squash; trains/merged-results OFF
         sub_results.append(
             self._run_sub(
                 ProjectSettingOperation,
