@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 # ---------------------------------------------------------------------------
@@ -68,6 +68,12 @@ class ActionResult:
     action: str  # "applied", "already_set", "skipped", "error"
     detail: str = ""
     dry_run: bool = False
+    # Non-fatal advisories: the operation SUCCEEDED, but something worth the
+    # operator's attention was observed (e.g. a setting was applied but a
+    # downstream prerequisite outside this tool's control is missing). Empty on
+    # the common path; serialized only when present so existing consumers are
+    # unaffected.
+    warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         d = {
@@ -80,4 +86,6 @@ class ActionResult:
         }
         if self.dry_run:
             d["dry_run"] = True
+        if self.warnings:
+            d["warnings"] = list(self.warnings)
         return d

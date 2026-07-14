@@ -90,6 +90,12 @@ class GitLabClient:
     def get(self, endpoint: str, params: dict | None = None) -> Any:
         return self._request("GET", endpoint, params=params).json()
 
+    def get_raw(self, endpoint: str, params: dict | None = None) -> str:
+        """GET an endpoint that returns raw (non-JSON) text — e.g. a repo file's
+        `/raw` content. Raises like `get` on HTTP error (callers that treat a 404
+        as "absent" must catch `requests.exceptions.HTTPError`)."""
+        return self._request("GET", endpoint, params=params).text
+
     def post(self, endpoint: str, data: dict | None = None) -> Any:
         return self._request("POST", endpoint, json=data).json()
 
