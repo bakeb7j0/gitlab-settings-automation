@@ -346,14 +346,35 @@ If the CI config only defines branch pipelines, then even with this knob set:
 - the MR gets a plain **branch** pipeline,
 - `only_allow_merge_if_pipeline_succeeds` gates on *that*,
 - the wave gate goes back to grading the **branch HEAD**,
-- and **every setting here audits clean.** `gl-settings kahuna-sandbox` reports `applied`.
+- and **every setting here would otherwise audit clean.**
 
-That is the same blindness this section exists to prevent, relocated one layer down. Check the
-project's `.gitlab-ci.yml` before trusting the gate.
+That is the same blindness this section exists to prevent, relocated one layer down.
+
+**`gl-settings kahuna-sandbox` now detects this (#34).** After applying the settings it reads the
+project's `.gitlab-ci.yml` and, if it finds no merge-request-pipeline rule, surfaces a **warning** in
+the result — the operation still succeeds (the CI config is not this tool's to own), but the gap is
+no longer silent:
+
+```json
+{"action": "applied", "warnings": ["merge_pipelines_enabled is ON, but .gitlab-ci.yml on 'main'
+ shows no merge-request-pipeline rule ... the KAHUNA trust gate grades the branch HEAD instead of
+ the merge result ..."]}
+```
+
+The check is read-only and **never fails the operation**. It degrades honestly: a missing
+`.gitlab-ci.yml`, an unreadable file, or a config that uses `include:` (whose rules may live in a
+file this check does not fetch) each produce a distinct *"could not verify"* note rather than a false
+all-clear. It is a strong signal, not a proof — treat a warning as "go look," not "definitely broken."
+
+It is a text scan, not a YAML parser (a parse would be no more authoritative given `include:`), so it
+has one **accepted blind spot**: it cannot distinguish an *admitting* marker from a *negating* one.
+A `merge_request_event` marker that appears only under `when: never`, or an `except: merge_requests`
+block, reads as "admits" and produces **no warning**. So an absent warning is "no obvious gap," not a
+guarantee. The common shapes — a real admit rule, or no rule at all — are detected correctly.
 
 Note also that GitLab **silently falls back** to a standard MR pipeline when the source and target
 branches have conflicting changes — so a merge-result pipeline is not guaranteed even on a correctly
-configured project.
+configured project, and this static check cannot see that per-MR runtime fallback.
 
 **Behavior:**
 

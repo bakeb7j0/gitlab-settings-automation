@@ -190,7 +190,23 @@ class KahunaSandboxOperation(Operation):
             )
         )
 
-        return self._summarize(project_id, project_path, sub_results)
+        # 5. advisory (read-only, never fatal) — merge_pipelines_enabled=True is
+        # NECESSARY but NOT SUFFICIENT to get a merge-result pipeline. GitLab also
+        # requires the project's .gitlab-ci.yml to admit merge-request pipelines. If
+        # it does not, every knob above audits clean while the MR only ever produces
+        # a BRANCH pipeline — and the KAHUNA trust gate then grades the branch HEAD
+        # instead of the merge result (mcp-server-sdlc#476, gl-settings#33). Detect
+        # that gap and surface it as a warning; the CI config is not this tool's to
+        # own, so we never fail on it.
+        #
+        # Only run when the settings actually applied cleanly: attaching pipeline
+        # advisories to a composite that ERRORED at project-setting is just noise on
+        # a result the operator will re-run anyway.
+        warnings: list[str] = []
+        if not _is_error(sub_results[-1]):
+            warnings = self._check_merge_request_pipeline_admission(project_id, project_path)
+
+        return self._summarize(project_id, project_path, sub_results, warnings)
 
     def _resolve_protected_branch_id(self, project_id: int, project_path: str, branch_pattern: str) -> int | None:
         """Resolve the numeric ID of a protected-branch entry by its name/pattern.
@@ -232,6 +248,7 @@ class KahunaSandboxOperation(Operation):
         project_id: int,
         project_path: str,
         sub_results: list[ActionResult],
+        warnings: list[str] | None = None,
     ) -> ActionResult:
         """Reduce per-sub-op results to a single composite ActionResult.
 
@@ -259,8 +276,103 @@ class KahunaSandboxOperation(Operation):
                 action=overall,
                 detail=detail,
                 dry_run=self.client.dry_run,
+                warnings=warnings or [],
             )
         )
+
+    # Token that a merge-request-pipeline rule must reference. GitLab admits
+    # merge-request pipelines via `$CI_PIPELINE_SOURCE == "merge_request_event"`
+    # in a workflow/job `rules:` block, or the legacy `only:/except: merge_requests`.
+    #
+    # KNOWN LIMITATION (accepted): this is a whole-file substring scan, so it cannot
+    # tell an ADMITTING marker from a NEGATING one. A marker that appears ONLY in a
+    # `when: never` rule, an `except: merge_requests` block, or an incidental string
+    # reads as "admits" → no warning, a FALSE all-clear. We accept this because (a) a
+    # full YAML parse would be no more authoritative — `include:` pulls rules from
+    # files we do not fetch — and (b) the far more common shape is a project with a
+    # real admit rule (correctly detected) or none at all (correctly warned). The
+    # advisory is a strong signal, not a proof; the operator is told to go look. The
+    # residual miss is documented in the README.
+    _MR_PIPELINE_MARKERS = ("merge_request_event", "merge_requests")
+
+    def _check_merge_request_pipeline_admission(self, project_id: int, project_path: str) -> list[str]:
+        """Read-only advisory: does the project's .gitlab-ci.yml admit merge-request
+        pipelines? Returns a list of warning strings (empty if it does, or if the
+        check could be affirmatively satisfied).
+
+        NEVER raises and NEVER fails the composite — the CI config is outside this
+        tool's ownership, and the operator may legitimately not run wave work here.
+        Every failure mode degrades to a distinct, honest note.
+        """
+        try:
+            project = self.client.get_project(project_id)
+            ref = project.get("default_branch") or "HEAD"
+        except Exception as e:  # noqa: BLE001 — advisory must not disturb the result
+            return [
+                "could not verify merge-request-pipeline admission "
+                f"(project lookup failed: {e}). Confirm .gitlab-ci.yml admits "
+                "merge-request pipelines manually — see gl-settings#33."
+            ]
+
+        encoded = urllib.parse.quote(".gitlab-ci.yml", safe="")
+        endpoint = f"/projects/{project_id}/repository/files/{encoded}/raw"
+        try:
+            content = self.client.get_raw(endpoint, params={"ref": ref})
+        except requests.exceptions.HTTPError as e:
+            status = e.response.status_code if e.response is not None else None
+            if status == 404:
+                # No .gitlab-ci.yml on the default branch — the project has no CI at
+                # all, so there is no merge-result pipeline to gate on. Distinct note,
+                # NOT a false all-clear.
+                return [
+                    f"could not verify: no .gitlab-ci.yml on '{ref}'. Without CI there "
+                    "is no merge-result pipeline for the KAHUNA gate to grade — "
+                    "confirm this project is meant to run wave work (gl-settings#33)."
+                ]
+            return [
+                "could not verify merge-request-pipeline admission "
+                f"(reading .gitlab-ci.yml failed: {'HTTP ' + str(status) if status else str(e)}). "
+                "Verify manually — gl-settings#33."
+            ]
+        except Exception as e:  # noqa: BLE001
+            return [
+                "could not verify merge-request-pipeline admission "
+                f"(unexpected error: {e}). Verify manually — gl-settings#33."
+            ]
+
+        if self._admits_merge_request_pipelines(content):
+            return []
+
+        # The file exists and, as far as we can see locally, references no
+        # merge-request-pipeline rule. Word it honestly: `include:` can pull rules
+        # from files we do not fetch, so this is a strong signal, not a proof.
+        note = (
+            "merge_pipelines_enabled is ON, but .gitlab-ci.yml on "
+            f"'{ref}' shows no merge-request-pipeline rule "
+            '($CI_PIPELINE_SOURCE == "merge_request_event", or only/except '
+            "merge_requests). Without one, MRs get a BRANCH pipeline only and the "
+            "KAHUNA trust gate grades the branch HEAD instead of the merge result "
+            "(gl-settings#33, mcp-server-sdlc#476). Add a merge-request-pipeline "
+            "rule, or confirm this project does not run wave work."
+        )
+        if "include:" in content or "include :" in content:
+            note += (
+                " NOTE: this config uses `include:` — the rule may live in an "
+                "included file this check does not fetch; verify there."
+            )
+        return [note]
+
+    @classmethod
+    def _admits_merge_request_pipelines(cls, content: str) -> bool:
+        """True if the raw .gitlab-ci.yml references a merge-request-pipeline marker
+        on a non-comment line. A raw-text scan (not a YAML parse) is deliberate:
+        GitLab `include:` means a full local parse still would not be authoritative,
+        and comments must not count."""
+        for raw_line in content.splitlines():
+            line = raw_line.split("#", 1)[0]  # strip trailing/whole-line comments
+            if any(marker in line for marker in cls._MR_PIPELINE_MARKERS):
+                return True
+        return False
 
 
 def _is_error(result: ActionResult) -> bool:

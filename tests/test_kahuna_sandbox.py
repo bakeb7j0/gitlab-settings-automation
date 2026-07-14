@@ -49,7 +49,29 @@ def make_args(**kwargs) -> argparse.Namespace:
 PROTECTED_BRANCH_ID = 42  # mock id returned by the resolve-after-protect GET
 
 
-def _mock_greenfield_project():
+def _mock_ci_config(ci_config: str) -> None:
+    """Register the step-5 advisory's raw `.gitlab-ci.yml` GET (#34).
+
+    ci_config: 'mr' → admits merge-request pipelines; 'branch_only' → no MR rule;
+    'missing' → 404 (no file).
+    """
+    url = f"{MOCK_API_URL}/projects/{PROJECT_ID}/repository/files/.gitlab-ci.yml/raw"
+    if ci_config == "missing":
+        responses.add(responses.GET, url, status=404)
+        return
+    if ci_config == "branch_only":
+        body = "test:\n  script: echo hi\n  rules:\n    - if: '$CI_COMMIT_BRANCH'\n"
+    else:  # 'mr'
+        body = (
+            "workflow:\n"
+            "  rules:\n"
+            "    - if: '$CI_PIPELINE_SOURCE == \"merge_request_event\"'\n"
+            "    - if: '$CI_COMMIT_BRANCH'\n"
+        )
+    responses.add(responses.GET, url, body=body, content_type="text/plain")
+
+
+def _mock_greenfield_project(ci_config: str = "mr"):
     """Stub GitLab responses for a project that has none of the sandbox knobs set.
 
     Order of HTTP calls:
@@ -121,6 +143,8 @@ def _mock_greenfield_project():
             "squash_option": "default_off",
             "merge_pipelines_enabled": False,
             "merge_trains_enabled": True,
+            # Read again by the step-5 advisory to resolve the ref for .gitlab-ci.yml.
+            "default_branch": "main",
         },
     )
     responses.add(
@@ -128,6 +152,10 @@ def _mock_greenfield_project():
         f"{MOCK_API_URL}/projects/{PROJECT_ID}",
         json={"id": PROJECT_ID},
     )
+
+    # 5. advisory (read-only): the .gitlab-ci.yml raw content. Default 'mr' ADMITS
+    # merge-request pipelines, so the greenfield happy path emits no warning.
+    _mock_ci_config(ci_config)
 
 
 class TestKahunaSandboxHappyPath:
@@ -142,8 +170,61 @@ class TestKahunaSandboxHappyPath:
         assert result.action == "applied"
         assert result.operation == "kahuna-sandbox"
         # Total HTTP calls: 5 GETs (push-rule, protect-branch, resolve-id,
-        # approval-rules, project) + 4 writes = 9
-        assert len(responses.calls) == 9, [c.request.url for c in responses.calls]
+        # approval-rules, project) + 4 writes + 2 read-only advisory GETs
+        # (project again for default_branch, .gitlab-ci.yml raw) = 11.
+        assert len(responses.calls) == 11, [c.request.url for c in responses.calls]
+        # The greenfield fixture's CI config admits MR pipelines → no warning.
+        assert result.warnings == [], result.warnings
+
+    @responses.activate
+    def test_warns_when_ci_config_has_no_mr_pipelines(self):
+        """#34 AC: merge_pipelines_enabled is applied, but the project's
+        .gitlab-ci.yml admits no merge-request pipelines → WARN, and the operation
+        still SUCCEEDS (the CI config is not this tool's to own)."""
+        _mock_greenfield_project(ci_config="branch_only")
+
+        op = KahunaSandboxOperation(GitLabClient(MOCK_GITLAB_URL, "test-token"), make_args())
+        result = op.apply_to_project(PROJECT_ID, PROJECT_PATH)
+
+        assert result.action == "applied"  # NOT failed — advisory never blocks
+        assert len(result.warnings) == 1, result.warnings
+        w = result.warnings[0]
+        assert "merge-request-pipeline rule" in w
+        assert "branch HEAD" in w  # names the actual failure mode
+        assert "gl-settings#33" in w
+        # And it surfaces in the serialized envelope.
+        assert result.to_dict()["warnings"] == result.warnings
+
+    @responses.activate
+    def test_no_warning_when_mr_pipelines_configured(self):
+        """#34 AC: a config WITH a merge_request_event rule → no warning."""
+        _mock_greenfield_project(ci_config="mr")
+
+        op = KahunaSandboxOperation(GitLabClient(MOCK_GITLAB_URL, "test-token"), make_args())
+        result = op.apply_to_project(PROJECT_ID, PROJECT_PATH)
+
+        assert result.action == "applied"
+        assert result.warnings == []
+        # Absent warnings must NOT appear in the serialized envelope (back-compat).
+        assert "warnings" not in result.to_dict()
+
+    @responses.activate
+    def test_unverifiable_ci_config_emits_distinct_note(self):
+        """#34 AC: a 404 on .gitlab-ci.yml → a DISTINCT 'could not verify' note,
+        never a false all-clear (which would let a blind gate look fine)."""
+        _mock_greenfield_project(ci_config="missing")
+
+        op = KahunaSandboxOperation(GitLabClient(MOCK_GITLAB_URL, "test-token"), make_args())
+        result = op.apply_to_project(PROJECT_ID, PROJECT_PATH)
+
+        assert result.action == "applied"
+        assert len(result.warnings) == 1, result.warnings
+        note = result.warnings[0]
+        assert "could not verify" in note.lower()
+        assert "no .gitlab-ci.yml" in note
+        # It is a NOTE, not the definite "no MR rule found" warning — the two are
+        # distinct so an operator does not misread "absent CI" as "misconfigured CI".
+        assert "shows no merge-request-pipeline rule" not in note
 
         # Confirm order of writes by URL
         write_urls = [c.request.url for c in responses.calls if c.request.method != "GET"]
@@ -281,14 +362,18 @@ class TestKahunaSandboxIdempotency:
                 "squash_option": "default_on",
                 "merge_pipelines_enabled": True,
                 "merge_trains_enabled": False,
+                "default_branch": "main",
             },
         )
+        # step-5 advisory (read-only): admits MR pipelines → no warning.
+        _mock_ci_config("mr")
 
         client = GitLabClient(MOCK_GITLAB_URL, "test-token")
         op = KahunaSandboxOperation(client, make_args())
         result = op.apply_to_project(PROJECT_ID, PROJECT_PATH)
 
         assert result.action == "already_set"
+        assert result.warnings == []  # the advisory found a valid config
         # Only GETs happened, zero writes
         methods = [c.request.method for c in responses.calls]
         assert all(m == "GET" for m in methods), methods
@@ -313,8 +398,11 @@ class TestKahunaSandboxDryRun:
                 "squash_option": "default_off",
                 "merge_pipelines_enabled": False,
                 "merge_trains_enabled": False,
+                "default_branch": "main",
             },
         )
+        # step-5 advisory is read-only, so it runs even under dry-run (GETs only).
+        _mock_ci_config("mr")
 
         client = GitLabClient(MOCK_GITLAB_URL, "test-token", dry_run=True)
         op = KahunaSandboxOperation(client, make_args())
@@ -377,3 +465,43 @@ class TestKahunaSandboxRegistration:
         registry = get_operation_registry()
         assert "kahuna-sandbox" in registry
         assert registry["kahuna-sandbox"] is KahunaSandboxOperation
+
+
+class TestMergeRequestPipelineScan:
+    """Direct tests for the raw .gitlab-ci.yml scan (#34). It is a TEXT scan, not a
+    YAML parse, and must ignore comments — a full parse would be no more
+    authoritative anyway, since `include:` can pull rules from files we don't fetch."""
+
+    def _admits(self, content: str) -> bool:
+        return KahunaSandboxOperation._admits_merge_request_pipelines(content)
+
+    def test_workflow_rule_admits(self):
+        assert self._admits("workflow:\n  rules:\n    - if: '$CI_PIPELINE_SOURCE == \"merge_request_event\"'\n")
+
+    def test_legacy_only_merge_requests_admits(self):
+        assert self._admits("test:\n  only:\n    - merge_requests\n")
+
+    def test_branch_only_config_does_not_admit(self):
+        assert not self._admits("test:\n  rules:\n    - if: '$CI_COMMIT_BRANCH'\n")
+
+    def test_a_commented_marker_does_not_count(self):
+        # The marker appears only in a comment — it admits nothing.
+        assert not self._admits("# TODO: add a merge_request_event rule later\ntest:\n  script: echo hi\n")
+
+    def test_trailing_comment_still_counts_the_real_rule(self):
+        assert self._admits(
+            "workflow:\n  rules:\n    - if: '$CI_PIPELINE_SOURCE == \"merge_request_event\"'  # MR pipelines\n"
+        )
+
+    def test_empty_config_does_not_admit(self):
+        assert not self._admits("")
+
+    def test_accepted_blind_spot_negated_marker_reads_as_admitting(self):
+        # DOCUMENTED LIMITATION, not a bug: the whole-file substring scan cannot see
+        # that this marker is negated by `when: never`, so it reads as admitting. A
+        # YAML parse would not help (include: defeats it), and over-warning is the
+        # only alternative. This test pins the behavior so a future reader treats it
+        # as a known trade-off (documented in the README) rather than "fixing" it
+        # into flakiness. If this ever becomes fixable, this assertion should flip.
+        negated = "workflow:\n  rules:\n    - if: '$CI_PIPELINE_SOURCE == \"merge_request_event\"'\n      when: never\n"
+        assert self._admits(negated)  # scanned as admit — the accepted false-positive
