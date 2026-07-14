@@ -311,21 +311,49 @@ gl-settings kahuna-sandbox <target> [--branch-name-regex "<regex>"]
 1. **Push rule** — `branch_name_regex` widened to include `kahuna/*`
 2. **Protected branch** — `kahuna/*` pattern protected (developer push + developer merge)
 3. **Approval rule** — `kahuna-zero-approvals` with `approvals_required=0` (per-branch scope via knob 2)
-4. **Project settings** — `only_allow_merge_if_pipeline_succeeds=true`, `squash_option=default_on`, `merge_pipelines_enabled=false`, `merge_trains_enabled=false`
+4. **Project settings** — `only_allow_merge_if_pipeline_succeeds=true`, `squash_option=default_on`, `merge_pipelines_enabled=true`, `merge_trains_enabled=false`
 
-Merge trains and merged-results pipelines are **disabled** by policy. An earlier version of this
-document claimed trains "batch multiple flight MRs into one pipeline run" — **that is false.** GitLab
-runs a pipeline *per MR in the train* and re-runs successors when a predecessor fails; stacked on
-merged-results pipelines, it cost **3 pipelines per MR** (push + merged-results + train) for a
-batching benefit that does not exist.
+**Merge trains are disabled. Merged-results pipelines are enabled. These are different features —
+do not conflate them.** (We did, once, and it silently blinded the wave gate. See #33.)
 
-Wave work never required a train: flights land on the `kahuna/*` integration branch, the wave engine
-reconciles them with `commutativity_verify` and dependency-ordered merges, and `kahuna→main` is a
-single serialized, trust-gated promotion. There is no concurrent-merge-to-main point for a train to
-guard.
+**Merge trains — OFF.** An earlier version of this document claimed trains "batch multiple flight MRs
+into one pipeline run." **That is false.** GitLab runs a pipeline *per MR in the train* and re-runs
+successors when a predecessor fails. Wave work never required one anyway: flights land on the
+`kahuna/*` integration branch, the wave engine reconciles them with `commutativity_verify` and
+dependency-ordered merges, and `kahuna→main` is a single serialized, trust-gated promotion. Nothing
+merges to the target concurrently, so there is nothing for a train to guard.
 
-The CI gate (`only_allow_merge_if_pipeline_succeeds`) is **not** what was removed — it stays on. Main
-branch protection is untouched.
+**Merged-results pipelines — ON.** These run CI against the *result of merging source into target*
+rather than against the source branch HEAD. A merge train happens to require them, but they stand on
+their own — and the KAHUNA trust gate **depends** on them: its CI signal validates the **merge-result**
+pipeline, never the branch HEAD (`mcp-server-sdlc#452`). Disable them and the gate keeps passing while
+silently grading the wrong commit. No error, just a blind gate.
+
+Dropping the train alone already takes GitLab from **3 pipelines per MR to 2** (push + merged-results).
+The third was the train. Going to 1 buys one pipeline and pays for it with a gate that no longer checks
+what it claims to check.
+
+The CI gate (`only_allow_merge_if_pipeline_succeeds`) stays on. Main branch protection is untouched.
+
+#### ⚠️ Prerequisite — the setting alone is not enough
+
+`merge_pipelines_enabled=true` is **necessary but not sufficient**. GitLab only produces a
+merged-results pipeline if the project's `.gitlab-ci.yml` also admits **merge-request pipelines** —
+i.e. a `workflow:rules` or job `rules` entry matching `$CI_PIPELINE_SOURCE == "merge_request_event"`.
+
+If the CI config only defines branch pipelines, then even with this knob set:
+
+- the MR gets a plain **branch** pipeline,
+- `only_allow_merge_if_pipeline_succeeds` gates on *that*,
+- the wave gate goes back to grading the **branch HEAD**,
+- and **every setting here audits clean.** `gl-settings kahuna-sandbox` reports `applied`.
+
+That is the same blindness this section exists to prevent, relocated one layer down. Check the
+project's `.gitlab-ci.yml` before trusting the gate.
+
+Note also that GitLab **silently falls back** to a standard MR pipeline when the source and target
+branches have conflicting changes — so a merge-result pipeline is not guaranteed even on a correctly
+configured project.
 
 **Behavior:**
 

@@ -44,8 +44,9 @@ declare -A PROJECT_SETTINGS=(
     ["only_allow_merge_if_pipeline_succeeds"]="true"
     ["only_allow_merge_if_all_discussions_are_resolved"]="true"
     ["remove_source_branch_after_merge"]="true"
-    # Queue-less policy: trains and merged-results pipelines OFF.
-    ["merge_pipelines_enabled"]="false"
+    # Trains OFF. Merged-results pipelines ON — they are a DIFFERENT feature, and the
+    # wave gate validates the merge-result pipeline they produce (mcp-server-sdlc#452).
+    ["merge_pipelines_enabled"]="true"
     ["merge_trains_enabled"]="false"
     ["issue_branch_template"]="feature/%{id}-%{title}"
 
