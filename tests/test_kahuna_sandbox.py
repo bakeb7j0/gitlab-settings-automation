@@ -106,18 +106,20 @@ def _mock_greenfield_project():
     )
 
     # 4. project-setting: GET current -> PUT changes.
-    # Current state models the REAL migration case: a project configured by the
-    # pre-queue-less release, i.e. trains and merged-results pipelines ON. This is
-    # what makes the disable path actually execute — if the fixture already said
-    # False, those keys would never appear in a PUT body and deleting them from
-    # SANDBOX_PROJECT_SETTINGS would leave the suite green.
+    # Current state models the REAL migration case, and it is deliberately WRONG in
+    # BOTH directions so the PUT body must carry both keys:
+    #   trains ON            -> must be turned OFF
+    #   merged-results OFF   -> must be turned ON   (the #33 regression: #31 wrongly
+    #                           disabled these, silently blinding the wave gate)
+    # If a fixture value already matched the desired value, that key would never
+    # appear in the PUT body and the guard below would assert nothing.
     responses.add(
         responses.GET,
         f"{MOCK_API_URL}/projects/{PROJECT_ID}",
         json={
             "only_allow_merge_if_pipeline_succeeds": False,
             "squash_option": "default_off",
-            "merge_pipelines_enabled": True,
+            "merge_pipelines_enabled": False,
             "merge_trains_enabled": True,
         },
     )
@@ -151,12 +153,20 @@ class TestKahunaSandboxHappyPath:
         assert write_urls[3].endswith(f"/projects/{PROJECT_ID}")
 
     @responses.activate
-    def test_project_setting_put_disables_trains_and_keeps_ci_gate(self):
-        """CRITICAL: the project-setting PUT must turn merge trains and
-        merged-results pipelines OFF (queue-less policy) while leaving the CI
-        gate and squash-on-merge ON. Without this assertion, deleting the
-        merge_trains_enabled / merge_pipelines_enabled entries from
-        SANDBOX_PROJECT_SETTINGS would leave the whole suite green.
+    def test_project_setting_put_disables_trains_but_keeps_merged_results(self):
+        """CRITICAL: merge TRAINS and MERGED-RESULTS pipelines are different
+        features and must move in OPPOSITE directions. This test exists because
+        #31 conflated them, turned both off, and silently blinded the wave gate
+        (#33).
+
+          merge_trains_enabled    -> False   (a train serializes MRs; we don't need one)
+          merge_pipelines_enabled -> True    (produces the MERGE-RESULT pipeline the
+                                              KAHUNA trust gate validates instead of the
+                                              branch HEAD -- mcp-server-sdlc#452. Turn it
+                                              off and the gate keeps passing while grading
+                                              the wrong commit. No error. Just blind.)
+
+        The CI gate and squash-on-merge must survive untouched.
         """
         import json
 
@@ -175,7 +185,8 @@ class TestKahunaSandboxHappyPath:
 
         body = json.loads(put_calls[0].request.body or "{}")
         assert body["merge_trains_enabled"] is False, body
-        assert body["merge_pipelines_enabled"] is False, body
+        # NOT False. These are different features -- see the docstring.
+        assert body["merge_pipelines_enabled"] is True, body
         # The CI gate is NOT what we removed — it must survive.
         assert body["only_allow_merge_if_pipeline_succeeds"] is True, body
         assert body["squash_option"] == "default_on", body
@@ -268,7 +279,7 @@ class TestKahunaSandboxIdempotency:
             json={
                 "only_allow_merge_if_pipeline_succeeds": True,
                 "squash_option": "default_on",
-                "merge_pipelines_enabled": False,
+                "merge_pipelines_enabled": True,
                 "merge_trains_enabled": False,
             },
         )

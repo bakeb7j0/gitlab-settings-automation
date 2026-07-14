@@ -13,8 +13,19 @@ Sub-ops applied, in order:
 2. ``protect-branch`` — protect ``kahuna/*`` pattern (prerequisite for 3).
 3. ``approval-rule`` — per-branch rule with ``approvals_required=0`` scoped
    to the protected ``kahuna/*`` pattern.
-4. ``project-setting`` — enable CI-gate and squash-on-merge. Merge trains and
-   merged-results pipelines are deliberately OFF (see ``SANDBOX_PROJECT_SETTINGS``).
+4. ``project-setting`` — enable CI-gate and squash-on-merge. Merge **trains** are
+   OFF; merged-results **pipelines** are ON. Those are different features and move
+   in opposite directions — see ``SANDBOX_PROJECT_SETTINGS``.
+
+.. warning::
+
+   ``merge_pipelines_enabled=True`` is necessary but **not sufficient** to get a
+   merge-result pipeline. GitLab also requires the project's ``.gitlab-ci.yml`` to
+   admit merge-request pipelines (a ``workflow``/job rule matching
+   ``$CI_PIPELINE_SOURCE == "merge_request_event"``). Without that, the MR only ever
+   gets a *branch* pipeline, and the KAHUNA trust gate is grading the branch HEAD —
+   with every knob here auditing clean. GitLab also silently falls back to a standard
+   MR pipeline when the branches have conflicting changes.
 """
 
 from __future__ import annotations
@@ -39,20 +50,37 @@ KAHUNA_APPROVAL_RULE_NAME = "kahuna-zero-approvals"
 
 # Sandbox-enabling project settings.
 #
-# Merge trains and merged-results pipelines are OFF by policy. A train does not
-# batch flight-MRs into one pipeline run — GitLab runs a pipeline per MR in the
-# train and re-runs successors when a predecessor fails. With merged-results
-# pipelines on top, that cost 3 pipelines per MR (push + merged-results + train).
-# Wave work never needed either: flights land on the kahuna branch, the engine
-# reconciles them with commutativity_verify + dependency-ordered merges, and
-# kahuna->main is a single serialized trust-gated promotion.
+# THESE TWO ARE DIFFERENT FEATURES. Do not conflate them (we did once, in #31,
+# and it silently blinded the wave gate — see #33).
 #
-# The CI gate (only_allow_merge_if_pipeline_succeeds) is NOT what we removed —
-# it stays on. Only the train/merged-results machinery is gone.
+#   merge_trains_enabled     — OFF. A train serializes MRs and runs a pipeline
+#                              PER MR IN THE TRAIN, re-running successors when a
+#                              predecessor fails. It does NOT batch them into one
+#                              run. Wave work never needed it: flights land on the
+#                              kahuna branch, the engine reconciles them with
+#                              commutativity_verify + dependency-ordered merges,
+#                              and kahuna->main is a single serialized, trust-gated
+#                              promotion. Nothing merges to the target concurrently.
+#
+#   merge_pipelines_enabled  — ON. "Merged results pipelines" run CI against the
+#                              RESULT OF MERGING source into target, rather than
+#                              against the source branch HEAD. A merge train happens
+#                              to require this, but it stands on its own — and the
+#                              KAHUNA trust gate DEPENDS on it: the gate's CI signal
+#                              validates the MERGE-RESULT pipeline, never the branch
+#                              HEAD (mcp-server-sdlc#452). Turn this off and the gate
+#                              silently grades the wrong thing — no error, it just
+#                              stops checking what it claims to check.
+#
+# Dropping the train alone already takes GitLab from 3 pipelines per MR to 2
+# (push + merged-results). The third was the train. Going to 1 buys one pipeline
+# and pays for it with a blind gate.
+#
+# The CI gate (only_allow_merge_if_pipeline_succeeds) stays on regardless.
 SANDBOX_PROJECT_SETTINGS: dict[str, bool | str] = {
     "only_allow_merge_if_pipeline_succeeds": True,
     "squash_option": "default_on",
-    "merge_pipelines_enabled": False,
+    "merge_pipelines_enabled": True,
     "merge_trains_enabled": False,
 }
 
@@ -150,7 +178,7 @@ class KahunaSandboxOperation(Operation):
         if _is_error(sub_results[-1]):
             return self._summarize(project_id, project_path, sub_results)
 
-        # 4. project-setting — CI-gate + squash; trains/merged-results OFF
+        # 4. project-setting — CI-gate + squash; trains OFF, merged-results ON
         sub_results.append(
             self._run_sub(
                 ProjectSettingOperation,
